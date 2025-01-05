@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "cmath": "cpp",
+        "chrono": "c",
+        "typeindex": "c",
+        "typeinfo": "c"
+    }
+}
