@@ -1,4 +1,0 @@
-module load openmpi/4.0.0
-sinteractive -c 10 -p long -A research -g 1
-mpicc test.c 
-mpirun -np 5 ./a.out
