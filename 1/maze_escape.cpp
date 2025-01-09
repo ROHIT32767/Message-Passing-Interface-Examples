@@ -57,7 +57,6 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
     {
-        // Input from Rank 0
         cin >> V >> E;
         adj_list.resize(V);
         for (int i = 0; i < E; i++)
@@ -74,7 +73,7 @@ int main(int argc, char *argv[])
                 adj_list[u].push_back(v);
             }
         }
-        cin >> R; // Source vertex
+        cin >> R;
         cin >> K;
         starting_nodes.resize(K);
         for (int i = 0; i < K; i++)
@@ -97,7 +96,6 @@ int main(int argc, char *argv[])
             if (start_vertex > end_vertex)
                 continue;
 
-            // Prepare sizes and flattened adjacency data
             vector<int> sizes, flat_data;
             for (int i = start_vertex; i <= end_vertex; i++)
             {
@@ -105,7 +103,6 @@ int main(int argc, char *argv[])
                 flat_data.insert(flat_data.end(), adj_list[i].begin(), adj_list[i].end());
             }
 
-            // Send sizes and flattened adjacency data
             int num_vertices = sizes.size();
             MPI_Send(&num_vertices, 1, MPI_INT, p, 0, MPI_COMM_WORLD);
             MPI_Send(sizes.data(), num_vertices, MPI_INT, p, 0, MPI_COMM_WORLD);
@@ -143,7 +140,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Broadcast global data
     MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&E, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&R, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -156,11 +152,10 @@ int main(int argc, char *argv[])
     int start_vertex = vertex_range.first;
     int end_vertex = vertex_range.second;
 
-    // Initialize BFS variables
-    vector<int> Lvs(V, -1); // Initialize levels of vertices
+
+    vector<int> Lvs(V, -1); 
     set<int> local_frontier;
 
-    // Source vertex R initialization
     if (R >= start_vertex && R <= end_vertex)
     {
         Lvs[R] = 0;
@@ -174,7 +169,6 @@ int main(int argc, char *argv[])
         set<int> new_neighbors;
         set<int> frontier_copy = local_frontier;
 
-        // Process local frontier
         for (int v : frontier_copy)
         {
             local_frontier.erase(v);
@@ -182,23 +176,21 @@ int main(int argc, char *argv[])
             for (int neighbor : local_adj_list[v-start_vertex])
             {
                 if (Lvs[neighbor] == -1)
-                { // If the vertex is not visited
+                { 
                     if (neighbor >= start_vertex && neighbor <= end_vertex)
                     {
-                        // Local node: Mark its level to level + 1
+                        
                         Lvs[neighbor] = level + 1;
                         local_frontier.insert(neighbor);
                     }
                     else
                     {
-                        // Non-local node
                         new_neighbors.insert(neighbor);
                     }
                 }
             }
         }
 
-        // Share new neighbors with other processes
         vector<int> to_send(new_neighbors.begin(), new_neighbors.end());
         vector<int> recv_buffer;
 
@@ -217,41 +209,27 @@ int main(int argc, char *argv[])
             if (p == rank)
                 continue;
 
-            // Send data to process `p`
             int send_size = to_send_to[p].size();
             MPI_Send(&send_size, 1, MPI_INT, p, 0, MPI_COMM_WORLD);
             if (send_size > 0)
             {
-               cout <<  "This is process " << rank << " sending " << send_size << " to process " << p << endl;
-                for(int i=0; i<send_size; i++){
-                    cout << to_send_to[p][i] << " ";
-                }
-                cout << endl;
                 MPI_Send(to_send_to[p].data(), send_size, MPI_INT, p, 0, MPI_COMM_WORLD);
             }
 
-            // Receive data from process `p`
             int recv_size;
             MPI_Recv(&recv_size, 1, MPI_INT, p, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             if (recv_size > 0)
             {
                 vector<int> temp(recv_size);
                 MPI_Recv(temp.data(), recv_size, MPI_INT, p, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                cout << "This is process " << rank << " receiving " << recv_size << " from process " << p << endl;
-                for(int i=0; i<recv_size; i++){
-                    cout << temp[i] << " ";
-                }
-                cout << endl;
                 recv_buffer.insert(recv_buffer.end(), temp.begin(), temp.end());
             }
         }
 
-        // Add received nodes to local frontier if not visited
         for (int neighbor : recv_buffer)
         {
             if (Lvs[neighbor] == -1)
             {
-                // If not visited, mark it with level + 1
                 Lvs[neighbor] = level + 1;
                 if (neighbor >= start_vertex && neighbor <= end_vertex)
                 {
@@ -260,21 +238,17 @@ int main(int argc, char *argv[])
             }
         }
 
-        // Check if global frontier is active
         global_active = !local_frontier.empty();
         MPI_Allreduce(MPI_IN_PLACE, &global_active, 1, MPI_C_BOOL, MPI_LOR, MPI_COMM_WORLD);
 
         if (global_active)
         {
-            level++; // Increase level after processing current level
+            level++; 
         }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    cout << "start_vertex: " << start_vertex << " end_vertex: " << end_vertex << " rank: " << rank << endl;
-
-    // Output BFS levels for debugging
     for (int i = start_vertex; i <= end_vertex; i++)
     {
         if (Lvs[i] != -1)
