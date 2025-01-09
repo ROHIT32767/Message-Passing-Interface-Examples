@@ -6,6 +6,33 @@
 #include <set>
 using namespace std;
 
+int get_process_number(int vertex, int total_processes, int total_vertices) {
+    int div = total_vertices / total_processes;
+    int rem = total_vertices % total_processes;
+    if (vertex < rem * (div + 1)) {
+        return vertex / (div + 1);
+    } else {
+        return rem + (vertex - rem * (div + 1)) / div;
+    }
+}
+
+pair<int,int> get_vertex_range(int process_number, int total_processes, int total_vertices) {
+    int div = total_vertices / total_processes;
+    int rem = total_vertices % total_processes;
+    int start_vertex, end_vertex;
+    if(process_number < rem) {
+        start_vertex = process_number * (div + 1);
+        end_vertex = start_vertex + div; 
+    } else {
+        start_vertex = rem * (div + 1) + (process_number - rem) * div;
+        end_vertex = start_vertex + div - 1;
+    }
+    if(start_vertex > end_vertex){
+        return {INT_MAX, INT_MIN};
+    }
+    return {start_vertex, end_vertex};
+}   
+
 int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
     int rank, size;
@@ -72,17 +99,16 @@ int main(int argc, char* argv[]) {
         MPI_Bcast(adj_list[i].data(), adj_sizes[i], MPI_INT, 0, MPI_COMM_WORLD);
     }
 
-    // Determine local vertices for each rank
-    int vertices_per_process = V / size;
-    int start_vertex = rank * vertices_per_process;
-    int end_vertex = (rank == size - 1) ? V : start_vertex + vertices_per_process;
+    pair<int, int> vertex_range = get_vertex_range(rank, size, V);
+    int start_vertex = vertex_range.first;
+    int end_vertex = vertex_range.second;
 
     // Initialize BFS variables
     vector<int> Lvs(V, -1);  // Initialize levels of vertices
     set<int> local_frontier;
     
     // Source vertex R initialization
-    if (R >= start_vertex && R < end_vertex) {
+    if (R >= start_vertex && R <= end_vertex) {
         Lvs[R] = 0;
         local_frontier.insert(R);
     }
@@ -99,7 +125,7 @@ int main(int argc, char* argv[]) {
 
             for (int neighbor : adj_list[v]) {
                 if (Lvs[neighbor] == -1) {  // If the vertex is not visited
-                    if (neighbor >= start_vertex && neighbor < end_vertex) {
+                    if (neighbor >= start_vertex && neighbor <= end_vertex) {
                         // Local node: Mark its level to level + 1
                         Lvs[neighbor] = level + 1;
                         local_frontier.insert(neighbor);
@@ -115,9 +141,8 @@ int main(int argc, char* argv[]) {
         vector<int> to_send(new_neighbors.begin(), new_neighbors.end());
         vector<int> recv_buffer;
 
-        for (int p = 0; p < size; p++) {
+        for (int p = 0; p < size; p++){
             if (p == rank) continue;
-
             // Send data to other processes
             int send_size = to_send.size();
             MPI_Send(&send_size, 1, MPI_INT, p, 0, MPI_COMM_WORLD);
@@ -136,7 +161,7 @@ int main(int argc, char* argv[]) {
             if (Lvs[neighbor] == -1) {
                 // If not visited, mark it with level + 1
                 Lvs[neighbor] = level + 1;
-                if (neighbor >= start_vertex && neighbor < end_vertex) {
+                if (neighbor >= start_vertex && neighbor <= end_vertex) {
                     local_frontier.insert(neighbor);
                 }
             }
@@ -151,8 +176,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    cout << "start_vertex: " << start_vertex << " end_vertex: " << end_vertex << " rank: " << rank << endl;
+
     // Output BFS levels for debugging
-    for (int i = start_vertex; i < end_vertex; i++) {
+    for (int i = start_vertex; i <= end_vertex; i++) {
         if (Lvs[i] != -1) {
             cout << "Rank " << rank << " Vertex " << i << " Level: " << Lvs[i] << endl;
         }
