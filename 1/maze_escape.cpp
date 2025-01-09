@@ -86,7 +86,41 @@ int main(int argc, char *argv[])
         {
             cin >> blocked_nodes[i];
         }
+    }
 
+    MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&E, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&R, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank != 0)
+    {
+        pair<int, int> vertex_range = get_vertex_range(rank, size, V);
+        int start = vertex_range.first;
+        int end = vertex_range.second;
+        if (start <= end)
+        {
+
+            int num_vertices;
+            MPI_Recv(&num_vertices, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            vector<int> sizes(num_vertices);
+            MPI_Recv(sizes.data(), num_vertices, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            int total_data = accumulate(sizes.begin(), sizes.end(), 0);
+            vector<int> flat_data(total_data);
+            MPI_Recv(flat_data.data(), total_data, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            local_adj_list.resize(num_vertices);
+            int index = 0;
+            for (int i = 0; i < num_vertices; i++)
+            {
+                local_adj_list[i].assign(flat_data.begin() + index, flat_data.begin() + index + sizes[i]);
+                index += sizes[i];
+            }
+        }
+    }
+    else
+    {
         for (int p = 1; p < size; p++)
         {
             pair<int, int> range = get_vertex_range(p, size, V);
@@ -94,7 +128,9 @@ int main(int argc, char *argv[])
             int end_vertex = range.second;
 
             if (start_vertex > end_vertex)
+            {
                 continue;
+            }
 
             vector<int> sizes, flat_data;
             for (int i = start_vertex; i <= end_vertex; i++)
@@ -119,32 +155,10 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (rank != 0)
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 0)
     {
-        int num_vertices;
-        MPI_Recv(&num_vertices, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        vector<int> sizes(num_vertices);
-        MPI_Recv(sizes.data(), num_vertices, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        int total_data = accumulate(sizes.begin(), sizes.end(), 0);
-        vector<int> flat_data(total_data);
-        MPI_Recv(flat_data.data(), total_data, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        local_adj_list.resize(num_vertices);
-        int index = 0;
-        for (int i = 0; i < num_vertices; i++)
-        {
-            local_adj_list[i].assign(flat_data.begin() + index, flat_data.begin() + index + sizes[i]);
-            index += sizes[i];
-        }
-    }
-
-    MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&E, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&R, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    if(rank==0){
         adj_list.clear();
     }
 
@@ -152,8 +166,7 @@ int main(int argc, char *argv[])
     int start_vertex = vertex_range.first;
     int end_vertex = vertex_range.second;
 
-
-    vector<int> Lvs(V, -1); 
+    vector<int> Lvs(V, -1);
     set<int> local_frontier;
 
     if (R >= start_vertex && R <= end_vertex)
@@ -173,13 +186,13 @@ int main(int argc, char *argv[])
         {
             local_frontier.erase(v);
 
-            for (int neighbor : local_adj_list[v-start_vertex])
+            for (int neighbor : local_adj_list[v - start_vertex])
             {
                 if (Lvs[neighbor] == -1)
-                { 
+                {
                     if (neighbor >= start_vertex && neighbor <= end_vertex)
                     {
-                        
+
                         Lvs[neighbor] = level + 1;
                         local_frontier.insert(neighbor);
                     }
@@ -243,7 +256,7 @@ int main(int argc, char *argv[])
 
         if (global_active)
         {
-            level++; 
+            level++;
         }
     }
 
