@@ -18,6 +18,16 @@ struct particle
     }
 };
 
+bool compareParticles(const particle &p1, const particle &p2)
+{
+    return p1.ind < p2.ind;
+}
+
+bool shouldRemoveParticle(const particle &p)
+{
+    return p.x == -1 && p.y == -1;
+}
+
 pair<int, int> get_row_range(int process_number, int total_processes, int total_rows)
 {
     int div = total_rows / total_processes;
@@ -35,9 +45,9 @@ pair<int, int> get_row_range(int process_number, int total_processes, int total_
     }
     if (start_vertex > end_vertex)
     {
-        return {1000, -1000};
+        return make_pair(1000, -1000);
     }
-    return {start_vertex, end_vertex};
+    return make_pair(start_vertex, end_vertex);
 }
 
 int get_process_number(int row, int total_processes, int total_rows)
@@ -89,10 +99,10 @@ void collisionHandle(vector<particle> &particles)
     {
         mp[particles[i].ind] = i;
     }
-    map<pair<int, int>, set<int>> indexParticles;
+    map< pair<int, int>, set<int> > indexParticles;
     for (int i = 0; i < particles.size(); i++)
     {
-        indexParticles[{particles[i].x, particles[i].y}].insert(particles[i].ind);
+        indexParticles[make_pair(particles[i].x, particles[i].y)].insert(particles[i].ind);
     }
 
     for (auto &entry : indexParticles)
@@ -169,10 +179,10 @@ int main(int argc, char *argv[])
             cin >> particles[i].x >> particles[i].y >> particles[i].dir;
             particles[i].ind = i;
         }
-        for (auto &particle : particles)
+        for (auto &particle_var : particles)
         {
-            int process = get_process_number(particle.y, size, M);
-            MPI_Send(&particle, 1, MPI_PARTICLE, process, 0, MPI_COMM_WORLD);
+            int process = get_process_number(particle_var.y, size, M);
+            MPI_Send(&particle_var, 1, MPI_PARTICLE, process, 0, MPI_COMM_WORLD);
             particleCount[process]++;
         }
     }
@@ -191,59 +201,57 @@ int main(int argc, char *argv[])
     MPI_Barrier(MPI_COMM_WORLD);
     for (int i = 0; i < T; i++)
     {
-        for (auto &particle : particles)
+        for (auto &particle_var : particles)
         {
-            if (particle.x == 0 && particle.dir == 'U')
+            if (particle_var.x == 0 && particle_var.dir == 'U')
             {
-                particle.x = N;
+                particle_var.x = N;
             }
-            else if (particle.x == N - 1 && particle.dir == 'D')
+            else if (particle_var.x == N - 1 && particle_var.dir == 'D')
             {
-                particle.x = -1;
+                particle_var.x = -1;
             }
-            else if (particle.y == 0 && particle.dir == 'L')
+            else if (particle_var.y == 0 && particle_var.dir == 'L')
             {
-                particle.y = M;
+                particle_var.y = M;
             }
-            else if (particle.y == M - 1 && particle.dir == 'R')
+            else if (particle_var.y == M - 1 && particle_var.dir == 'R')
             {
-                particle.y = -1;
+                particle_var.y = -1;
             }
         }
         MPI_Barrier(MPI_COMM_WORLD);
-        for (auto &particle : particles)
+        for (auto &particle_var : particles)
         {
             MPI_Request request;
-            if (particle.y == -1 && particle.dir == 'R')
+            if (particle_var.y == -1 && particle_var.dir == 'R')
             {
                 int proc_num = get_process_number(0, size, M);
-                MPI_Send(&particle, 1, MPI_PARTICLE, proc_num, 0, MPI_COMM_WORLD);
-                particle.x = -1;
-                particle.y = -1;
+                MPI_Send(&particle_var, 1, MPI_PARTICLE, proc_num, 0, MPI_COMM_WORLD);
+                particle_var.x = -1;
+                particle_var.y = -1;
             }
-            else if (particle.y == M && particle.dir == 'L')
+            else if (particle_var.y == M && particle_var.dir == 'L')
             {
                 int proc_num = get_process_number(M - 1, size, M);
-                MPI_Send(&particle, 1, MPI_PARTICLE, proc_num, 0, MPI_COMM_WORLD);
-                particle.x = -1;
-                particle.y = -1;
+                MPI_Send(&particle_var, 1, MPI_PARTICLE, proc_num, 0, MPI_COMM_WORLD);
+                particle_var.x = -1;
+                particle_var.y = -1;
             }
-            else if (particle.y == start_row && (rank - 1) >= 0 && particle.dir == 'L')
+            else if (particle_var.y == start_row && (rank - 1) >= 0 && particle_var.dir == 'L')
             {
-                MPI_Send(&particle, 1, MPI_PARTICLE, rank - 1, 0, MPI_COMM_WORLD);
-                particle.x = -1;
-                particle.y = -1;
+                MPI_Send(&particle_var, 1, MPI_PARTICLE, rank - 1, 0, MPI_COMM_WORLD);
+                particle_var.x = -1;
+                particle_var.y = -1;
             }
-            else if (particle.y == end_row && (rank + 1) < size && particle.dir == 'R')
+            else if (particle_var.y == end_row && (rank + 1) < size && particle_var.dir == 'R')
             {
-                MPI_Send(&particle, 1, MPI_PARTICLE, rank + 1, 0, MPI_COMM_WORLD);
-                particle.x = -1;
-                particle.y = -1;
+                MPI_Send(&particle_var, 1, MPI_PARTICLE, rank + 1, 0, MPI_COMM_WORLD);
+                particle_var.x = -1;
+                particle_var.y = -1;
             }
         }
-        particles.erase(std::remove_if(particles.begin(), particles.end(), [](const particle &p)
-                                       { return p.x == -1 and p.y == -1; }),
-                        particles.end());
+        particles.erase(std::remove_if(particles.begin(), particles.end(), shouldRemoveParticle), particles.end());
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank + 1 < size)
         {
@@ -315,28 +323,28 @@ int main(int argc, char *argv[])
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
-        for (auto &particle : particles)
+        for (auto &particle_var : particles)
         {
-            int x = particle.x;
-            int y = particle.y;
-            if (particle.dir == 'L')
+            int x = particle_var.x;
+            int y = particle_var.y;
+            if (particle_var.dir == 'L')
             {
                 y--;
             }
-            else if (particle.dir == 'R')
+            else if (particle_var.dir == 'R')
             {
                 y++;
             }
-            else if (particle.dir == 'U')
+            else if (particle_var.dir == 'U')
             {
                 x--;
             }
-            else if (particle.dir == 'D')
+            else if (particle_var.dir == 'D')
             {
                 x++;
             }
-            particle.x = x;
-            particle.y = y;
+            particle_var.x = x;
+            particle_var.y = y;
         }
         MPI_Barrier(MPI_COMM_WORLD);
         collisionHandle(particles);
@@ -362,11 +370,10 @@ int main(int argc, char *argv[])
     MPI_Gatherv(&particles[0], particles.size(), MPI_PARTICLE, &allParticles[0], &recvcounts[0], &displs[0], MPI_PARTICLE, 0, MPI_COMM_WORLD);
     if (rank == 0)
     {
-        sort(allParticles.begin(), allParticles.end(), [](const particle &p1, const particle &p2)
-             { return p1.ind < p2.ind; });
-        for (auto &particle : allParticles)
+        sort(allParticles.begin(), allParticles.end(), compareParticles);
+        for (auto &particle_var : allParticles)
         {
-            cout << particle.x << " " << particle.y << " " << particle.dir << endl;
+            cout << particle_var.x << " " << particle_var.y << " " << particle_var.dir << endl;
         }
     }
     MPI_Finalize();

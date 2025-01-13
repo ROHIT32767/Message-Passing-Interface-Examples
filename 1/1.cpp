@@ -37,9 +37,9 @@ pair<int, int> get_vertex_range(int process_number, int total_processes, int tot
     }
     if (start_vertex > end_vertex)
     {
-        return {1000, -1000};
+        return make_pair(1000, -1000);
     }
-    return {start_vertex, end_vertex};
+    return make_pair(start_vertex, end_vertex);
 }
 
 int main(int argc, char *argv[])
@@ -50,10 +50,10 @@ int main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     int V, E, R, K, L;
-    vector<vector<int>> adj_list;
+    vector< vector<int> > adj_list;
     vector<int> blocked_nodes;
     vector<int> starting_nodes;
-    vector<vector<int>> local_adj_list;
+    vector< vector<int> > local_adj_list;
     vector<int> local_level_array;
     
 
@@ -213,7 +213,7 @@ int main(int argc, char *argv[])
         vector<int> to_send(new_neighbors.begin(), new_neighbors.end());
         vector<int> recv_buffer;
 
-        vector<vector<int>> to_send_to(size);
+        vector< vector<int> > to_send_to(size);
         for (int neighbor : to_send)
         {
             int owner_process = get_process_number(neighbor, size, V);
