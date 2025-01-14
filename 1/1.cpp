@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     vector<int> starting_nodes;
     vector< vector<int> > local_adj_list;
     vector<int> local_level_array;
-    
+    set<int> blocked_set;
 
     if (rank == 0)
     {
@@ -88,15 +88,23 @@ int main(int argc, char *argv[])
         {
             cin >> blocked_nodes[i];
         }
+        blocked_set.insert(blocked_nodes.begin(), blocked_nodes.end());
     }
-
+    
     MPI_Barrier(MPI_COMM_WORLD);
-
     MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&E, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&R, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&K, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&L, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank != 0)
+    {
+        blocked_nodes.resize(L);
+    }
+
+    MPI_Bcast(blocked_nodes.data(), L, MPI_INT, 0, MPI_COMM_WORLD);
+    blocked_set.insert(blocked_nodes.begin(), blocked_nodes.end());
 
     if (rank != 0)
     {
@@ -180,8 +188,10 @@ int main(int argc, char *argv[])
 
     if (R >= start_vertex && R <= end_vertex)
     {
-        local_level_array[R-start_vertex] = 0;
-        local_frontier.insert(R);
+        if(blocked_set.find(R) == blocked_set.end()){
+            local_level_array[R-start_vertex] = 0;
+            local_frontier.insert(R);
+        }
     }
 
     bool global_active = true;
@@ -197,7 +207,10 @@ int main(int argc, char *argv[])
 
             for (int neighbor : local_adj_list[v - start_vertex])
             {
-                if(neighbor >= start_vertex && neighbor <= end_vertex){
+                if(blocked_set.find(neighbor) != blocked_set.end()){
+                    continue;
+                }
+                else if(neighbor >= start_vertex && neighbor <= end_vertex){
                     if (local_level_array[neighbor - start_vertex] == -1)
                     {
                         local_level_array[neighbor - start_vertex] = level + 1;
@@ -247,7 +260,10 @@ int main(int argc, char *argv[])
 
         for (int neighbor : recv_buffer)
         {
-            if(neighbor >= start_vertex && neighbor <= end_vertex){
+            if(blocked_set.find(neighbor) != blocked_set.end()){
+                continue;
+            }
+            else if(neighbor >= start_vertex && neighbor <= end_vertex){
                 if(local_level_array[neighbor - start_vertex] == -1){
                     local_level_array[neighbor - start_vertex] = level + 1;
                     local_frontier.insert(neighbor);
