@@ -6,164 +6,175 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <map>
+#include <sstream>
 
 #define CHUNK_SIZE 32
 #define REPLICATION_FACTOR 3
+#define MAX_FILE_NAME_SIZE 100
+#define UPLOAD_TAG 1
+#define RETRIEVE_TAG 2
+#define SEARCH_TAG 3
+#define FAILOVER_TAG 4
+#define RECOVER_TAG 5
+#define EXIT_TAG 6
 
 using namespace std;
 
-struct ChunkInfo {
+struct ChunkMetaData{
     int chunk_id;
-    vector<int> nodes; // Nodes storing this chunk
+    vector<int> replica_node_ranks;
 };
 
-unordered_map<string, vector<ChunkInfo>> metadata;
+struct FileMetaData{
+    string file_name;
+    vector<ChunkMetaData> chunks;
+};
 
-void metadata_server(int world_size) {
-    char command[256];
+struct Body{
+    int request_type;
+    char file_name[MAX_FILE_NAME_SIZE];
+    int chunk_id;
+    char data[CHUNK_SIZE];
+};
 
-    while (true) {
-        MPI_Status status;
-        MPI_Recv(command, 256, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+struct Chunk{
+    int chunk_id;
+    string data;
+};
 
-        string cmd(command);
-        if (cmd.find("upload") == 0) {
-            // Upload a file
-            string file_name = cmd.substr(7, cmd.find(" ", 7) - 7);
-            string file_path = cmd.substr(cmd.find(" ", 7) + 1);
+vector<int> getReplicaNodeRanks(int chunk_id, int N){
+    return {chunk_id % N, (chunk_id + 1) % N, (chunk_id + 2) % N};
+}
 
-            ifstream file(file_path, ios::binary);
-            if (!file) {
-                cerr << "Error opening file: " << file_path << endl;
-                continue;
-            }
 
-            vector<ChunkInfo> chunks;
-            int chunk_id = 0;
-            int node = 1; // Start distributing from rank 1
-            char buffer[CHUNK_SIZE];
-
-            while (file.read(buffer, CHUNK_SIZE) || file.gcount() > 0) {
-                int bytes_read = file.gcount();
-
-                vector<int> nodes;
-                for (int i = 0; i < REPLICATION_FACTOR; ++i) {
-                    nodes.push_back(node);
-                    node = (node % (world_size - 1)) + 1; // Round-robin distribution
+int main(int argc, char **argv)
+{
+    int size, rank;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int blocklength = sizeof(Body);
+    MPI_Datatype MPI_BODY;
+    MPI_Type_contiguous(blocklength, MPI_BYTE, &MPI_BODY);
+    MPI_Type_commit(&MPI_BODY);
+    if (rank == 0)
+    {
+        // Master Metadata Server
+        map<string, FileMetaData> files;
+        int N = size;
+        string command;
+        while (getline(cin, command))
+        {
+            stringstream ss(command);
+            ss >> command;
+            if (command == "upload")
+            {
+                string file_name;
+                ss >> file_name;
+                string relative_path;
+                ss >> relative_path;
+                ifstream file(relative_path);
+                if (!file)
+                {
+                    cout << "File not found" << endl;
+                    continue;
                 }
-
-                for (int n : nodes) {
-                    MPI_Send(buffer, bytes_read, MPI_CHAR, n, chunk_id, MPI_COMM_WORLD);
-                }
-
-                chunks.push_back({chunk_id, nodes});
-                ++chunk_id;
-            }
-
-            metadata[file_name] = chunks;
-            cout << "File uploaded: " << file_name << endl;
-
-        } else if (cmd.find("retrieve") == 0) {
-            // Retrieve a file
-            string file_name = cmd.substr(9);
-
-            if (metadata.find(file_name) == metadata.end()) {
-                cout << "-1" << endl;
-                continue;
-            }
-
-            vector<ChunkInfo> chunks = metadata[file_name];
-            ofstream output_file(file_name, ios::binary);
-
-            for (const ChunkInfo &chunk : chunks) {
-                char buffer[CHUNK_SIZE];
-                MPI_Status status;
-                MPI_Recv(buffer, CHUNK_SIZE, MPI_CHAR, chunk.nodes[0], chunk.chunk_id, MPI_COMM_WORLD, &status);
-                output_file.write(buffer, status._ucount);
-            }
-
-            output_file.close();
-            cout << "File retrieved: " << file_name << endl;
-
-        } else if (cmd.find("search") == 0) {
-            // Search for a word
-            string file_name = cmd.substr(7, cmd.find(" ", 7) - 7);
-            string word = cmd.substr(cmd.find(" ", 7) + 1);
-
-            if (metadata.find(file_name) == metadata.end()) {
-                cout << "-1" << endl;
-                continue;
-            }
-
-            vector<ChunkInfo> chunks = metadata[file_name];
-            bool found = false;
-
-            for (const ChunkInfo &chunk : chunks) {
-                for (int node : chunk.nodes) {
-                    MPI_Send(word.c_str(), word.size() + 1, MPI_CHAR, node, chunk.chunk_id, MPI_COMM_WORLD);
-                    int result;
-                    MPI_Recv(&result, 1, MPI_INT, node, chunk.chunk_id, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                    if (result == 1) {
-                        found = true;
-                        break;
+                string buffer;
+                buffer.resize(CHUNK_SIZE);
+                int chunk_id = 0;
+                while (file.read(&buffer[0], CHUNK_SIZE) || file.gcount() > 0)
+                {
+                    vector<int> replica_node_ranks = getReplicaNodeRanks(chunk_id, N);
+                    string chunk_data = buffer.substr(0, file.gcount());
+                    Body body;
+                    body.request_type = UPLOAD_TAG;
+                    body.file_name = file_name;
+                    body.chunk_id = chunk_id;
+                    body.data = chunk_data;
+                    for(int i=0;i<replica_node_ranks.size();i++){
+                        MPI_Send(&body, 1, MPI_BODY, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
                     }
+                    ChunkMetaData chunk_metadata;
+                    chunk_metadata.chunk_id = chunk_id;
+                    chunk_metadata.replica_node_ranks = replica_node_ranks;
+                    files[file_name].chunks.push_back(chunk_metadata);
+                    chunk_id++;
                 }
-                if (found) break;
             }
+            else if(command == "list_file"){
 
-            cout << (found ? "Word found" : "-1") << endl;
-
-        } else if (cmd.find("list_file") == 0) {
-            // List chunks of a file
-            string file_name = cmd.substr(10);
-
-            if (metadata.find(file_name) == metadata.end()) {
-                cout << "-1" << endl;
-                continue;
             }
+            else if(command == "retrieve"){
+                string file_name;
+                ss >> file_name;
+                FileMetaData file_metadata = files[file_name];
+                for(int i=0;i<file_metadata.chunks.size();i++){
+                    ChunkMetaData chunk_metadata = file_metadata.chunks[i];
+                    Body body;
+                    body.request_type = RETRIEVE_TAG;
+                    body.file_name = file_name;
+                    body.chunk_id = chunk_metadata.chunk_id;
+                    int rank_to_send = chunk_metadata.replica_node_ranks[0];
+                    MPI_Send(&body, 1, MPI_BODY, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
+                }
+                for(int i=0;i<file_metadata.chunks.size();i++){
+                    Body body;
+                    int rank_to_send = file_metadata.chunks[i].replica_node_ranks[0];
+                    MPI_Recv(&body, 1, MPI_BODY, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    cout<<body.data;
+                }
+            }
+            else if(command == "search"){
 
-            vector<ChunkInfo> chunks = metadata[file_name];
-            for (const ChunkInfo &chunk : chunks) {
-                cout << "Chunk " << chunk.chunk_id << " stored on nodes: ";
-                for (int node : chunk.nodes) cout << node << " ";
-                cout << endl;
+            }
+            else if(command == "failover"){
+                
+            }
+            else if(command == "recover"){
+
+            }
+            else if(command == "exit"){
+                break;
             }
         }
     }
-}
-
-void storage_node(int rank) {
-    unordered_map<int, string> chunks;
-
-    while (true) {
-        char buffer[CHUNK_SIZE];
-        MPI_Status status;
-        MPI_Recv(buffer, CHUNK_SIZE, MPI_CHAR, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-
-        int chunk_id = status.MPI_TAG;
-        chunks[chunk_id] = string(buffer, status._ucount);
+    else
+    {
+        map<string, vector<Chunk>> storage;
+        while(true){
+            Body body;
+            MPI_Status status;
+            MPI_Recv(&body, 1, MPI_BODY, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            if(status.MPI_TAG == UPLOAD_TAG){
+                Chunk chunk;
+                chunk.chunk_id = body.chunk_id;
+                chunk.data = body.data;
+                storage[body.file_name].push_back(chunk);
+            }
+            else if(status.MPI_TAG == RETRIEVE_TAG){
+                Chunk chunk = storage[body.file_name][body.chunk_id];
+                Body body;
+                body.request_type = RETRIEVE_TAG;
+                body.file_name = body.file_name;
+                body.chunk_id = body.chunk_id;
+                body.data = chunk.data;
+                MPI_Send(&body, 1, MPI_BODY, 0, RETRIEVE_TAG, MPI_COMM_WORLD);
+            }
+            else if(status.MPI_TAG == SEARCH_TAG){
+                
+            }
+            else if(status.MPI_TAG == FAILOVER_TAG){
+                
+            }
+            else if(status.MPI_TAG == RECOVER_TAG){
+                
+            }
+            else if(status.MPI_TAG == EXIT_TAG){
+                break;
+            }
+        }
     }
-}
-
-int main(int argc, char **argv) {
-    MPI_Init(&argc, &argv);
-
-    int world_rank, world_size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-
-    if (world_size < 4) {
-        cerr << "At least 4 processes are required." << endl;
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-
-    if (world_rank == 0) {
-        metadata_server(world_size);
-    } else {
-        storage_node(world_rank);
-    }
-
     MPI_Finalize();
     return 0;
 }
