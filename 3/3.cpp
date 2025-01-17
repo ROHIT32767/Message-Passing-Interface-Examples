@@ -18,6 +18,13 @@
 #define RECOVER_TAG 5
 #define EXIT_TAG 6
 
+struct Compare {
+    bool operator()(const pair<int, int>& a, const pair<int, int>& b) const {
+        return a.first < b.first || (a.first == b.first && a.second < b.second);
+    }
+};
+
+
 using namespace std;
 
 struct ChunkMetaData
@@ -52,6 +59,31 @@ vector<int> getReplicaNodeRanks(int chunk_id, int N)
         1 + ((chunk_id + 2) % (N - 1))};
 }
 
+void increment_size(multiset<pair<int, int>, Compare> &chunk_size_set, int node)
+{
+    auto it = find_if(chunk_size_set.begin(), chunk_size_set.end(), [node](const pair<int, int> &p) {
+        return p.second == node;
+    });
+    if (it != chunk_size_set.end())
+    {
+        it->first++;
+    }
+    else
+    {
+        chunk_size_set.insert({1, node});
+    }
+}
+
+vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N){
+    vector<int> replicate_node_ranks;
+    auto it = chunk_size_set.begin();
+    for (int i = 0; i < 3; i++){
+        replicate_node_ranks.push_back(it->second);
+        it++;
+    }
+    return replicate_node_ranks;
+}
+
 MPI_Datatype MPI_BODY;
 
 int main(int argc, char **argv)
@@ -67,6 +99,7 @@ int main(int argc, char **argv)
     {
         // Master Metadata Server
         map<string, FileMetaData> files;
+        multiset<pair<int, int>, Compare> chunk_size_set;
         int N = size;
         string command;
         while (getline(cin, command))
@@ -90,7 +123,7 @@ int main(int argc, char **argv)
                 int chunk_id = 0;
                 while (file.read(&buffer[0], CHUNK_SIZE) || file.gcount() > 0)
                 {
-                    vector<int> replica_node_ranks = getReplicaNodeRanks(chunk_id, N);
+                    vector<int> replica_node_ranks = get_replicate_node_ranks(chunk_size_set, N);
                     string chunk_data = buffer.substr(0, file.gcount());
                     Body body;
                     body.request_type = UPLOAD_TAG;
@@ -104,6 +137,7 @@ int main(int argc, char **argv)
                         int chunk_data_size = chunk_data.size();
                         MPI_Send(&chunk_data_size, 1, MPI_INT, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
                         MPI_Send(chunk_data.c_str(), chunk_data_size, MPI_CHAR, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
+                        increment_size(chunk_size_set, replica_node_ranks[i]);
                     }
                     ChunkMetaData chunk_metadata;
                     chunk_metadata.chunk_id = chunk_id;
@@ -174,12 +208,24 @@ int main(int argc, char **argv)
             }
             else if (command == "search")
             {
+
             }
             else if (command == "failover")
             {
+                int failover_rank;
+                ss >> failover_rank;
+                for(int i=0;i<files.size();i++){
+                    for(int j=0;j<files[file_name].chunks.size();j++){
+                        files[file_name].chunks[j].replica_node_ranks.erase(remove(files[file_name].chunks[j].replica_node_ranks.begin(), files[file_name].chunks[j].replica_node_ranks.end(), failover_rank), files[file_name].chunks[j].replica_node_ranks.end());
+                    }
+                }
+                Body body;
+                body.request_type = FAILOVER_TAG;
+                MPI_Send(&body, 1, MPI_BODY, failover_rank, FAILOVER_TAG, MPI_COMM_WORLD);
             }
             else if (command == "recover")
             {
+                
             }
             else if (command == "exit")
             {
@@ -240,9 +286,11 @@ int main(int argc, char **argv)
             }
             else if (status.MPI_TAG == FAILOVER_TAG)
             {
+                storage.clear();
             }
             else if (status.MPI_TAG == RECOVER_TAG)
             {
+                
             }
             else if (status.MPI_TAG == EXIT_TAG)
             {
