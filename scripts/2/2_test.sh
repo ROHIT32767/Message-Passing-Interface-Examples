@@ -3,7 +3,7 @@
 if ls ../../2/*.py &>/dev/null; then
     executable="python3 ../../2/*.py"
 elif ls ../../2/*.cpp &>/dev/null; then
-    mpic++ -std=c++20 -o 2 ../../2/*.cpp 
+    mpic++ -std=c++20 -o 2 ../../2/*.cpp
     executable="./2"
 elif ls ../../2/*.c &>/dev/null; then
     mpicc -o 2 ../../2/*.c
@@ -30,11 +30,7 @@ for i in $(seq 1 $num_test_cases); do
     all_passed=true
 
     for np in {1..12}; do
-        if [[ "$executable" == python* ]]; then
-            mpiexec -np $np --use-hwthread-cpus --oversubscribe $executable < $test_file > results/2_${np}_${i}.txt
-        else
-            mpiexec -np $np --use-hwthread-cpus --oversubscribe $executable < $test_file > results/2_${np}_${i}.txt
-        fi
+        mpiexec -np $np --use-hwthread-cpus --oversubscribe $executable < $test_file > results/2_${np}_${i}.txt
 
         normalize_spaces results/2_${np}_${i}.txt results/2_${np}_${i}_normalized.txt
         normalize_spaces $expected_output results/expected_${i}_normalized.txt

@@ -1,5 +1,0 @@
-Send heartbeat messages every second or two, however the check interval for marking a node as down for the metadata server should be 5 seconds.
-The size of a word in the testcases would not exceed 32 bytes.
-No 2 files which will be uploaded will have the same name.
-You can assume that the maximum size of each file would be of the order of 1-2 mb.
-Note that the marks distribution given is just a rough idea of the different weightages of the test cases. There would be large combined test cases as well, due to which there might be slight variations.
