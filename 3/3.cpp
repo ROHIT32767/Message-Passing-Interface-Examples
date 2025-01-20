@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <map>
 #include <sstream>
-
+#include <set>
 #define CHUNK_SIZE 32
 #define REPLICATION_FACTOR 3
 #define UPLOAD_TAG 1
@@ -17,6 +17,8 @@
 #define FAILOVER_TAG 4
 #define RECOVER_TAG 5
 #define EXIT_TAG 6
+
+using namespace std;
 
 struct Compare
 {
@@ -80,31 +82,31 @@ vector<int> getReplicaNodeRanks(int chunk_id, int N, set<int> &failed_nodes)
     return replica_nodes;
 }
 
-void increment_size(multiset<pair<int, int>, Compare> &chunk_size_set, int node)
-{
-    auto it = find_if(chunk_size_set.begin(), chunk_size_set.end(), [node](const pair<int, int> &p)
-                      { return p.second == node; });
-    if (it != chunk_size_set.end())
-    {
-        it->first++;
-    }
-    else
-    {
-        chunk_size_set.insert({1, node});
-    }
-}
+// void increment_size(multiset<pair<int, int>, Compare> &chunk_size_set, int node)
+// {
+//     auto it = find_if(chunk_size_set.begin(), chunk_size_set.end(), [node](const pair<int, int> &p)
+//                       { return p.second == node; });
+//     if (it != chunk_size_set.end())
+//     {
+//         it->first = it->first + 1;
+//     }
+//     else
+//     {
+//         chunk_size_set.insert({1, node});
+//     }
+// }
 
-vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N)
-{
-    vector<int> replicate_node_ranks;
-    auto it = chunk_size_set.begin();
-    for (int i = 0; i < 3; i++)
-    {
-        replicate_node_ranks.push_back(it->second);
-        it++;
-    }
-    return replicate_node_ranks;
-}
+// vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N)
+// {
+//     vector<int> replicate_node_ranks;
+//     auto it = chunk_size_set.begin();
+//     for (int i = 0; i < 3; i++)
+//     {
+//         replicate_node_ranks.push_back(it->second);
+//         it++;
+//     }
+//     return replicate_node_ranks;
+// }
 
 MPI_Datatype MPI_BODY;
 
@@ -121,7 +123,7 @@ int main(int argc, char **argv)
     {
         // Master Metadata Server
         map<string, FileMetaData> files;
-        multiset<pair<int, int>, Compare> chunk_size_set;
+        // multiset<pair<int, int>, Compare> chunk_size_set;
         int N = size;
         string command;
         set<int> failed_nodes;
@@ -164,7 +166,7 @@ int main(int argc, char **argv)
                         int chunk_data_size = chunk_data.size();
                         MPI_Send(&chunk_data_size, 1, MPI_INT, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
                         MPI_Send(chunk_data.c_str(), chunk_data_size, MPI_CHAR, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
-                        increment_size(chunk_size_set, replica_node_ranks[i]);
+                        // increment_size(chunk_size_set, replica_node_ranks[i]);
                     }
                     ChunkMetaData chunk_metadata;
                     chunk_metadata.chunk_id = chunk_id;
@@ -257,11 +259,14 @@ int main(int argc, char **argv)
                 Body body;
                 body.request_type = SEARCH_TAG;
                 for(int node_rank : nodes_with_chunks){
+                    // send request type
                     MPI_Send(&body, 1, MPI_BODY, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     int file_name_size = file_name.size();
+                    // send file name size followed by filename
                     MPI_Send(&file_name_size, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     MPI_Send(file_name.c_str(), file_name_size, MPI_CHAR, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     int word_size = word.size();
+                    // send word size followed by word
                     MPI_Send(&word_size, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     MPI_Send(word.c_str(), word_size, MPI_CHAR, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                 }
@@ -269,36 +274,39 @@ int main(int argc, char **argv)
                 for(int node_rank : nodes_with_chunks){
                     int num_chunks;
                     MPI_Status status;
+                    // get number of relevant chunks
                     MPI_Recv(&num_chunks, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                     for(int i = 0; i < num_chunks; i++){
                         int chunk_id;
+                        // send chunk_id
                         MPI_Recv(&chunk_id, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                         int chunk_size;
+                        // send chunk_size
                         MPI_Recv(&chunk_size, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                         string chunk_data;
                         chunk_data.resize(chunk_size);
+                        // send chunk
                         MPI_Recv(&chunk_data[0], chunk_size, MPI_CHAR, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                         received_chunks.emplace_back(chunk_id, chunk_data);
                     }
                 }
                 // remove duplicates
                 sort(received_chunks.begin(), received_chunks.end());
+                cout << "Number of recieved chunks from Distributed search " << received_chunks.size() << endl;
                 received_chunks.erase(unique(received_chunks.begin(), received_chunks.end()), received_chunks.end());
+                cout << "Number of unique chunks from Distributed Search " << received_chunks.size() << endl;
                 for (const auto &chunk : received_chunks)
                 {
                     cout << chunk.first << " " << chunk.second << endl;
                 }
-                cout << endl;
             }
             else if (command == "failover")
             {
                 int failover_rank;
                 ss >> failover_rank;
-                for (int i = 0; i < files.size(); i++)
-                {
-                    for (int j = 0; j < files[file_name].chunks.size(); j++)
-                    {
-                        files[file_name].chunks[j].replica_node_ranks.erase(remove(files[file_name].chunks[j].replica_node_ranks.begin(), files[file_name].chunks[j].replica_node_ranks.end(), failover_rank), files[file_name].chunks[j].replica_node_ranks.end());
+                for(auto &file:files){
+                    for(auto &chunk:file.second.chunks){
+                        chunk.replica_node_ranks.erase(find(chunk.replica_node_ranks.begin(), chunk.replica_node_ranks.end(), failover_rank));
                     }
                 }
                 failed_nodes.insert(failover_rank);
@@ -370,13 +378,17 @@ int main(int argc, char **argv)
             {
                 string file_name;
                 int file_name_size;
+                // recieve file name size
                 MPI_Recv(&file_name_size, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 file_name.resize(file_name_size);
+                // recieve filename
                 MPI_Recv(&file_name[0], file_name_size, MPI_CHAR, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 string word;
                 int word_size;
+                // recieve word size
                 MPI_Recv(&word_size, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 word.resize(word_size);
+                // recieve word
                 MPI_Recv(&word[0], word_size, MPI_CHAR, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 vector<pair<int, string>> chunks;
                 for(int i = 0; i < storage[file_name].size(); i++){
@@ -385,12 +397,16 @@ int main(int argc, char **argv)
                     }
                 }
                 int num_chunks = chunks.size();
+                // send number of relevant chunks
                 MPI_Send(&num_chunks, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD);
                 for(int i = 0; i < num_chunks; i++){
                     int chunk_id = chunks[i].first;
                     int chunk_data_size = chunks[i].second.size();
+                    // send chunk_id
                     MPI_Send(&chunk_id, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD);
+                    // send chunk size
                     MPI_Send(&chunk_data_size, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD);
+                    // send chunk
                     MPI_Send(chunks[i].second.c_str(), chunk_data_size, MPI_CHAR, 0, SEARCH_TAG, MPI_COMM_WORLD);
                 }
             }
