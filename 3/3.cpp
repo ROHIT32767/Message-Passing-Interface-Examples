@@ -40,6 +40,7 @@ struct FileMetaData
 {
     string file_name;
     vector<ChunkMetaData> chunks;
+    vector<int> offsets;
 };
 
 struct Body
@@ -82,32 +83,6 @@ vector<int> getReplicaNodeRanks(int chunk_id, int N, set<int> &failed_nodes)
     return replica_nodes;
 }
 
-// void increment_size(multiset<pair<int, int>, Compare> &chunk_size_set, int node)
-// {
-//     auto it = find_if(chunk_size_set.begin(), chunk_size_set.end(), [node](const pair<int, int> &p)
-//                       { return p.second == node; });
-//     if (it != chunk_size_set.end())
-//     {
-//         it->first = it->first + 1;
-//     }
-//     else
-//     {
-//         chunk_size_set.insert({1, node});
-//     }
-// }
-
-// vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N)
-// {
-//     vector<int> replicate_node_ranks;
-//     auto it = chunk_size_set.begin();
-//     for (int i = 0; i < 3; i++)
-//     {
-//         replicate_node_ranks.push_back(it->second);
-//         it++;
-//     }
-//     return replicate_node_ranks;
-// }
-
 MPI_Datatype MPI_BODY;
 
 int main(int argc, char **argv)
@@ -123,7 +98,6 @@ int main(int argc, char **argv)
     {
         // Master Metadata Server
         map<string, FileMetaData> files;
-        // multiset<pair<int, int>, Compare> chunk_size_set;
         int N = size;
         string command;
         set<int> failed_nodes;
@@ -146,6 +120,7 @@ int main(int argc, char **argv)
                 string buffer;
                 buffer.resize(CHUNK_SIZE);
                 int chunk_id = 0;
+                int offset = 0;
                 while (file.read(&buffer[0], CHUNK_SIZE) || file.gcount() > 0)
                 {
                     vector<int> replica_node_ranks = getReplicaNodeRanks(chunk_id, N, failed_nodes);
@@ -166,7 +141,6 @@ int main(int argc, char **argv)
                         int chunk_data_size = chunk_data.size();
                         MPI_Send(&chunk_data_size, 1, MPI_INT, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
                         MPI_Send(chunk_data.c_str(), chunk_data_size, MPI_CHAR, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
-                        // increment_size(chunk_size_set, replica_node_ranks[i]);
                     }
                     ChunkMetaData chunk_metadata;
                     chunk_metadata.chunk_id = chunk_id;
@@ -174,6 +148,8 @@ int main(int argc, char **argv)
                     replica_node_ranks.erase(remove(replica_node_ranks.begin(), replica_node_ranks.end(), -1), replica_node_ranks.end());
                     chunk_metadata.replica_node_ranks = replica_node_ranks;
                     files[file_name].chunks.push_back(chunk_metadata);
+                    files[file_name].offsets.push_back(offset);
+                    offset += file.gcount();
                     chunk_id++;
                 }
                 cout << 1 << endl;
@@ -292,13 +268,36 @@ int main(int argc, char **argv)
                 }
                 // remove duplicates
                 sort(received_chunks.begin(), received_chunks.end());
-                cout << "Number of recieved chunks from Distributed search " << received_chunks.size() << endl;
                 received_chunks.erase(unique(received_chunks.begin(), received_chunks.end()), received_chunks.end());
-                cout << "Number of unique chunks from Distributed Search " << received_chunks.size() << endl;
-                for (const auto &chunk : received_chunks)
-                {
-                    cout << chunk.first << " " << chunk.second << endl;
+                vector<int> keyword_offsets;
+                for(int i=0;i<received_chunks.size();i++){
+                    int id_chunk = received_chunks[i].first;
+                    int offset = files[file_name].offsets[id_chunk];
+                    size_t start = 0;
+                    size_t end;
+                    string last_word;
+                    string next_word;
+                    while((end = received_chunks[i].second.find(' ', start)) != string::npos){
+                        if(received_chunks[i].second.substr(start,end-start) == word){
+                            keyword_offsets.push_back(offset+start);
+                        }
+                        last_word = received_chunks[i].second.substr(start,end-start);
+                        start = end+1;
+                    }
+                    if(i+1 < received_chunks.size()){
+                        while((end = received_chunks[i+1].second.find(word, start)) != string::npos){
+                            next_word = received_chunks[i+1].second.substr(start,end-start);
+                            break;
+                        }
+                        if(last_word+next_word == word){
+                            keyword_offsets.push_back(offset+start);
+                        }
+                    }
                 }
+                for(int offset : keyword_offsets){
+                    cout << offset << " ";
+                }
+                cout << endl;
             }
             else if (command == "failover")
             {
