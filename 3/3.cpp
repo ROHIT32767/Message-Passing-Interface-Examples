@@ -83,6 +83,41 @@ vector<int> getReplicaNodeRanks(int chunk_id, int N, set<int> &failed_nodes)
     return replica_nodes;
 }
 
+void increment_size(std::multiset<std::pair<int, int>, Compare> &chunk_size_set, int node){
+    auto it = std::find_if(chunk_size_set.begin(), chunk_size_set.end(), [node](const std::pair<int, int> &p)
+                           { return p.second == node; });
+    if (it != chunk_size_set.end())
+    {
+        std::pair<int, int> updated = *it; 
+        chunk_size_set.erase(it);         
+        updated.first += 1;               
+        chunk_size_set.insert(updated);   
+    }
+    else
+    {
+        chunk_size_set.insert({1, node});
+    }
+}
+
+vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N,set<int> &failed_nodes){
+    // get the first 3 nodes with the least number of chunks that are not failed
+    vector<int> replica_nodes;
+    auto it = chunk_size_set.begin();
+    for (int i = 0; i < 3; ++i)
+    {
+        while(it != chunk_size_set.end() && failed_nodes.find(it->second) != failed_nodes.end()){
+            it++;
+        }
+        if(it != chunk_size_set.end()){
+            replica_nodes.push_back(it->second);
+            it++;
+        }else{
+            replica_nodes.push_back(-1);
+        }
+    }
+    return replica_nodes;
+}
+
 MPI_Datatype MPI_BODY;
 
 int main(int argc, char **argv)
@@ -98,6 +133,11 @@ int main(int argc, char **argv)
     {
         // Master Metadata Server
         map<string, FileMetaData> files;
+        multiset<pair<int, int>, Compare> chunk_size_set;
+        for (int i = 1; i < size; i++)
+        {
+            chunk_size_set.insert({0, i});
+        }
         int N = size;
         string command;
         set<int> failed_nodes;
@@ -126,7 +166,7 @@ int main(int argc, char **argv)
                 int offset = 0;
                 while (file.read(&buffer[0], CHUNK_SIZE) || file.gcount() > 0)
                 {
-                    vector<int> replica_node_ranks = getReplicaNodeRanks(chunk_id, N, failed_nodes);
+                    vector<int> replica_node_ranks = get_replicate_node_ranks(chunk_size_set, N, failed_nodes);
                     string chunk_data = buffer.substr(0, file.gcount());
                     Body body;
                     body.request_type = UPLOAD_TAG;
@@ -144,6 +184,7 @@ int main(int argc, char **argv)
                         int chunk_data_size = chunk_data.size();
                         MPI_Send(&chunk_data_size, 1, MPI_INT, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
                         MPI_Send(chunk_data.c_str(), chunk_data_size, MPI_CHAR, replica_node_ranks[i], UPLOAD_TAG, MPI_COMM_WORLD);
+                        increment_size(chunk_size_set, replica_node_ranks[i]);
                     }
                     ChunkMetaData chunk_metadata;
                     chunk_metadata.chunk_id = chunk_id;
@@ -343,6 +384,15 @@ int main(int argc, char **argv)
                 ss >> failover_rank;
                 failed_nodes.insert(failover_rank);
                 cout << 1 << endl;
+                auto it = std::find_if(chunk_size_set.begin(), chunk_size_set.end(), [failover_rank](const std::pair<int, int> &p)
+                           { return p.second == failover_rank; });
+                if (it != chunk_size_set.end())
+                {
+                    std::pair<int, int> updated = *it; 
+                    chunk_size_set.erase(it);         
+                    updated.first = 0;               
+                    chunk_size_set.insert(updated);   
+                }
             }
             else if (command == "recover")
             {

@@ -1,0 +1,8 @@
+We would be releasing checker scripts in a few days, using which you can easily test your submission format along side the sample inputs provided. Any submission format errors would thus attract huge penalties as we would be providing the checker scripts beforehand.
+Any modifications in the assignment or any updates will be given via Moodle.
+
+Send heartbeat messages every second or two, however the check interval for marking a node as down for the metadata server should be 5 seconds.
+The size of a word in the testcases would not exceed 32 bytes.
+No 2 files which will be uploaded will have the same name.
+You can assume that the maximum size of each file would be of the order of 1-2 mb.
+Note that the marks distribution given is just a rough idea of the different weightages of the test cases. There would be large combined test cases as well, due to which there might be slight variations.
