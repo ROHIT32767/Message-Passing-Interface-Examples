@@ -9,10 +9,15 @@
 #include <map>
 #include <sstream>
 #include <set>
+
+
 #include <thread>
-#include <chrono>
 #include <mutex>
-#include <condition_variable>
+#include <chrono>
+#include <atomic>
+#include <filesystem>
+
+
 #define CHUNK_SIZE 32
 #define REPLICATION_FACTOR 3
 #define UPLOAD_TAG 1
@@ -23,16 +28,8 @@
 #define EXIT_TAG 6
 #define HEARTBEAT_TAG 7
 
-#define HEARTBEAT_INTERVAL 1000  
-#define FAILOVER_INTERVAL 3000  
-
 using namespace std;
-using namespace std::chrono_literals;
-mutex metadata_mutex;
-unordered_map<int, chrono::steady_clock::time_point> last_heartbeat; 
-unordered_map<int, bool> node_status; 
-unordered_map<string, vector<int>> chunk_metadata; 
-mutex cout_mutex;
+
 
 MPI_Datatype MPI_BODY;
 
@@ -136,65 +133,63 @@ vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_si
     return replica_nodes;
 }
 
-void heartbeat_sender(int rank, int root_rank, condition_variable& cv, bool& is_active, mutex& active_mutex, MPI_Comm comm, bool& should_stop) {
-    Body signal;
-    signal.sender_rank = rank;
-    signal.stop = false;    
-    while (!should_stop) {
+// Global variables for heartbeat tracking
+map<int, atomic<bool>> nodes_active; // Active state of each node
+map<int, atomic<bool>> nodes_failed; // Tracks if a node is in failover state
+mutex heartbeat_mutex;              // Synchronizes access to node status
+map<int, chrono::steady_clock::time_point> last_heartbeat; // Tracks last heartbeat time
+
+atomic<bool> terminate_threads(false);
+
+void heartbeat_checker(int size)
+{
+    while (!terminate_threads)
+    {
         {
-            unique_lock<mutex> lock(active_mutex);
-            if (!is_active) {
-                cv.wait(lock); // Wait for recovery signal
-                cout_mutex.lock();
-                cout << "Node " << rank << " recovered. Resuming heartbeats in heartbeat_sender." << endl;
-                cout_mutex.unlock();
+            lock_guard<mutex> lock(heartbeat_mutex);
+            auto now = chrono::steady_clock::now();
+            for (int i = 1; i < size; ++i)
+            {
+                if (!nodes_active[i] || nodes_failed[i])
+                    continue;
+
+                if (chrono::duration_cast<chrono::seconds>(now - last_heartbeat[i]).count() > 3)
+                {
+                    cout << "Node " << i << " marked as down due to missing heartbeat." << endl;
+                    nodes_active[i] = false;
+                }
             }
         }
-        MPI_Send(&signal, 1, MPI_BODY, root_rank, HEARTBEAT_TAG, comm);
-        this_thread::sleep_for(chrono::milliseconds(HEARTBEAT_INTERVAL));
-    }
-}
-
-// Root node's function to monitor heartbeats
-void heartbeat_monitor(int rank, MPI_Comm comm, bool& should_stop) {
-    Body signal;
-    while (!should_stop) {
-        MPI_Recv(&signal, 1, MPI_BODY, MPI_ANY_SOURCE, HEARTBEAT_TAG, comm, MPI_STATUS_IGNORE);
-        if (signal.stop) {
-            lock_guard<mutex> lock(metadata_mutex);
-            node_status[signal.sender_rank] = false;
-            cout_mutex.lock();
-            cout << "Node " << signal.sender_rank << " marked as down." << endl;
-            cout_mutex.unlock();
-            continue;
-        }
-        lock_guard<mutex> lock(metadata_mutex);
-        last_heartbeat[signal.sender_rank] = chrono::steady_clock::now();
-        if(!node_status[signal.sender_rank]){
-            cout_mutex.lock();
-            cout << "Node " << signal.sender_rank << " recovered in heartbeat_monitor." << endl;
-            cout_mutex.unlock();
-        }
-        node_status[signal.sender_rank] = true; // Mark as active
-    }
-}
-
-// Periodic check for failed nodes
-void failover_checker(bool& should_stop) {
-    while (!should_stop) {
         this_thread::sleep_for(chrono::seconds(1));
-        auto now = chrono::steady_clock::now();
-        lock_guard<mutex> lock(metadata_mutex);
-        for (auto& [rank, timestamp] : last_heartbeat) {
-            if (node_status[rank] && chrono::duration_cast<chrono::milliseconds>(now - timestamp).count() > FAILOVER_INTERVAL) {
-                node_status[rank] = false;
-                cout_mutex.lock();
-                cout << "Failover: Node " << rank << " is down (no heartbeat)." << endl;
-                cout_mutex.unlock();
-            }
-        }
     }
 }
+
+void heartbeat_listener(int rank, int size)
+{
+    while (!terminate_threads)
+    {
+        Body heartbeat;
+        MPI_Status status;
+        int flag;
+        MPI_Iprobe(MPI_ANY_SOURCE, HEARTBEAT_TAG, MPI_COMM_WORLD, &flag, &status);
+        if (flag)
+        {
+            MPI_Recv(&heartbeat, 1, MPI_BODY, MPI_ANY_SOURCE, HEARTBEAT_TAG, MPI_COMM_WORLD, &status);
+
+            {
+                lock_guard<mutex> lock(heartbeat_mutex);
+                int sender_rank = heartbeat.sender_rank;
+                if (!nodes_failed[sender_rank])
+                {
+                    last_heartbeat[sender_rank] = chrono::steady_clock::now();
+                    nodes_active[sender_rank] = true;
+                }
+            }
+        }
+        this_thread::sleep_for(chrono::milliseconds(100)); // Prevent busy waiting
+    }
+}
+
 
 int main(int argc, char **argv)
 {
@@ -213,15 +208,19 @@ int main(int argc, char **argv)
         for (int i = 1; i < size; i++)
         {
             chunk_size_set.insert({0, i});
+            nodes_active[i] = true;
+            nodes_failed[i] = false;
+            last_heartbeat[i] = chrono::steady_clock::now();
         }
         int N = size;
         string command;
         set<int> failed_nodes;
         std::filesystem::path cpp_file_path(__FILE__);
         std::filesystem::path cpp_directory = cpp_file_path.parent_path();
-        bool should_stop = false;
-        thread monitor_thread(heartbeat_monitor, rank, MPI_COMM_WORLD, ref(should_stop));
-        thread checker_thread(failover_checker, ref(should_stop));
+
+        thread heartbeat_check_thread(heartbeat_checker, size);
+        thread heartbeat_listen_thread(heartbeat_listener, rank, size);
+
         while (getline(cin, command))
         {
             stringstream ss(command);
@@ -472,51 +471,66 @@ int main(int argc, char **argv)
                     updated.first = 0;               
                     chunk_size_set.insert(updated);   
                 }
-                Body signal;
-                signal.stop = true;
-                MPI_Send(&signal, 1, MPI_BODY, failover_rank, FAILOVER_TAG, MPI_COMM_WORLD);
-                lock_guard<mutex> lock(metadata_mutex);
-                node_status[failover_rank] = false;
-                cout_mutex.lock();
-                cout << "Failover triggered for rank " << failover_rank << "." << endl;
-                cout_mutex.unlock();
+                {
+                    // lock_guard<mutex> lock(heartbeat_mutex);
+                    // nodes_failed[failover_rank] = true;
+                    // cout << "Node " << failover_rank << " is in failover state." << endl;
+                }
+                Body body = {FAILOVER_TAG, 0, rank, true};
+                MPI_Send(&body, 1, MPI_BODY, failover_rank, FAILOVER_TAG, MPI_COMM_WORLD);
             }
             else if (command == "recover")
             {
                 int recover_rank;
                 ss >> recover_rank;
+                {
+                    // lock_guard<mutex> lock(heartbeat_mutex);
+                    // nodes_failed[recover_rank] = false;
+                    // nodes_active[recover_rank] = true;
+                    // last_heartbeat[recover_rank] = chrono::steady_clock::now();
+                    // cout << "Node " << recover_rank << " has been recovered." << endl;
+                }
+                Body body = {RECOVER_TAG, 0, rank, false};
+                MPI_Send(&body, 1, MPI_BODY, recover_rank, RECOVER_TAG, MPI_COMM_WORLD);
                 failed_nodes.erase(recover_rank);
                 cout << 1 << endl;
-                Body signal;
-                signal.stop = false;
-                MPI_Send(&signal, 1, MPI_BODY, recover_rank, RECOVER_TAG, MPI_COMM_WORLD);
-                cout_mutex.lock();
-                cout << "Recovery triggered for rank " << recover_rank << "." << endl;
-                cout_mutex.unlock();
             }
             else if (command == "exit")
             {
+                // Signal threads to terminate
+                terminate_threads = true;
+
+                // Join threads
+                heartbeat_check_thread.join();
+                heartbeat_listen_thread.join();
+
                 for (int i = 1; i < size; i++)
                 {
                     Body body;
                     MPI_Send(&body, 1, MPI_BODY, i, EXIT_TAG, MPI_COMM_WORLD);
                 }
-                should_stop = true;
                 break;
             }
         }
-        monitor_thread.join();
-        checker_thread.join();
-        cout << "running " << rank << endl;
     }
     else
     {
         map<string, vector<Chunk>> storage;
-        condition_variable cv;
-        mutex active_mutex;
-        bool is_active = true;
-        bool should_stop = false; 
-        thread sender_thread(heartbeat_sender, rank, 0, ref(cv), ref(is_active), ref(active_mutex), MPI_COMM_WORLD, ref(should_stop));
+        bool active = true;
+
+        thread heartbeat_thread([&]() {
+            while (!terminate_threads)
+            {
+                if (active)
+                {
+                    Body heartbeat = {HEARTBEAT_TAG, 0, rank, false};
+                    heartbeat.sender_rank = rank;
+                    MPI_Send(&heartbeat, 1, MPI_BODY, 0, HEARTBEAT_TAG, MPI_COMM_WORLD);
+                }
+                this_thread::sleep_for(chrono::seconds(1));
+            }
+        });
+
         while (true)
         {
             Body body;
@@ -598,35 +612,21 @@ int main(int argc, char **argv)
             }
             else if (status.MPI_TAG == FAILOVER_TAG)
             {
-                lock_guard<mutex> lock(active_mutex);
-                is_active = false;
-                cout_mutex.lock();
-                cout << "Node " << rank << " received failover signal. Stopping heartbeats." << endl;
-                cout_mutex.unlock();
-
-                Body ack_signal;
-                ack_signal.sender_rank = rank;
-                ack_signal.stop = true; // Indicate this node has stopped
-                MPI_Send(&ack_signal, 1, MPI_BODY, 0, HEARTBEAT_TAG, MPI_COMM_WORLD);
+                active = false;
+                // cout << "Node " << rank << " is in failover state. Stopping heartbeats." << endl;
             }
             else if (status.MPI_TAG == RECOVER_TAG)
             {
-                lock_guard<mutex> lock(active_mutex);
-                is_active = true;
-                cv.notify_all();
-                cout_mutex.lock();
-                cout << "Node " << rank << " recovered. Resuming heartbeats." << endl;
-                cout_mutex.unlock();
+                active = true;
+                // cout << "Node " << rank << " has been recovered." << endl;
             }
             else if (status.MPI_TAG == EXIT_TAG)
             {
-                
+                terminate_threads = true;
+                heartbeat_thread.join();
                 break;
             }
-            cout << "running " << rank << endl;
         }
-        should_stop = true; 
-        sender_thread.join();
     }
     MPI_Finalize();
     return 0;
