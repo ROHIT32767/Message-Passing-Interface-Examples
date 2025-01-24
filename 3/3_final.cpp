@@ -1,6 +1,6 @@
-
 #include <mpi.h>
 #include <iostream>
+#include <sstream>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -11,13 +11,11 @@
 #include <sstream>
 #include <set>
 
-
 #include <thread>
 #include <mutex>
 #include <chrono>
 #include <atomic>
 #include <filesystem>
-
 
 #define CHUNK_SIZE 32
 #define REPLICATION_FACTOR 3
@@ -30,7 +28,6 @@
 #define HEARTBEAT_TAG 7
 
 using namespace std;
-
 
 MPI_Datatype MPI_BODY;
 
@@ -99,15 +96,16 @@ vector<int> getReplicaNodeRanks(int chunk_id, int N, set<int> &failed_nodes)
     return replica_nodes;
 }
 
-void increment_size(std::multiset<std::pair<int, int>, Compare> &chunk_size_set, int node){
+void increment_size(std::multiset<std::pair<int, int>, Compare> &chunk_size_set, int node)
+{
     auto it = std::find_if(chunk_size_set.begin(), chunk_size_set.end(), [node](const std::pair<int, int> &p)
                            { return p.second == node; });
     if (it != chunk_size_set.end())
     {
-        std::pair<int, int> updated = *it; 
-        chunk_size_set.erase(it);         
-        updated.first += 1;               
-        chunk_size_set.insert(updated);   
+        std::pair<int, int> updated = *it;
+        chunk_size_set.erase(it);
+        updated.first += 1;
+        chunk_size_set.insert(updated);
     }
     else
     {
@@ -115,30 +113,34 @@ void increment_size(std::multiset<std::pair<int, int>, Compare> &chunk_size_set,
     }
 }
 
-vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N,set<int> &failed_nodes){
-    // get the first 3 nodes with the least number of chunks that are not failed
+vector<int> get_replicate_node_ranks(multiset<pair<int, int>, Compare> &chunk_size_set, int N, set<int> &failed_nodes)
+{
     vector<int> replica_nodes;
     auto it = chunk_size_set.begin();
     for (int i = 0; i < 3; ++i)
     {
-        while(it != chunk_size_set.end() && failed_nodes.find(it->second) != failed_nodes.end()){
+        while (it != chunk_size_set.end() && failed_nodes.find(it->second) != failed_nodes.end())
+        {
             it++;
         }
-        if(it != chunk_size_set.end()){
+        if (it != chunk_size_set.end())
+        {
             replica_nodes.push_back(it->second);
             it++;
-        }else{
+        }
+        else
+        {
             replica_nodes.push_back(-1);
         }
     }
     return replica_nodes;
 }
 
-// Global variables for heartbeat tracking
-map<int, atomic<bool>> nodes_active; // Active state of each node
-map<int, atomic<bool>> nodes_failed; // Tracks if a node is in failover state
-mutex heartbeat_mutex;              // Synchronizes access to node status
-map<int, chrono::steady_clock::time_point> last_heartbeat; // Tracks last heartbeat time
+
+map<int, atomic<bool>> nodes_active;                       
+map<int, atomic<bool>> nodes_failed;
+mutex heartbeat_mutex;             
+map<int, chrono::steady_clock::time_point> last_heartbeat;
 
 atomic<bool> terminate_threads(false);
 
@@ -153,10 +155,8 @@ void heartbeat_checker(int size)
             {
                 if (!nodes_active[i] || nodes_failed[i])
                     continue;
-
                 if (chrono::duration_cast<chrono::seconds>(now - last_heartbeat[i]).count() > 3)
                 {
-                    cout << "Node " << i << " marked as down due to missing heartbeat." << endl;
                     nodes_active[i] = false;
                 }
             }
@@ -187,10 +187,9 @@ void heartbeat_listener(int rank, int size)
                 }
             }
         }
-        this_thread::sleep_for(chrono::milliseconds(100)); // Prevent busy waiting
+        this_thread::sleep_for(chrono::milliseconds(100)); 
     }
 }
-
 
 int main(int argc, char **argv)
 {
@@ -203,7 +202,6 @@ int main(int argc, char **argv)
     MPI_Type_commit(&MPI_BODY);
     if (rank == 0)
     {
-        // Master Metadata Server
         map<string, FileMetaData> files;
         multiset<pair<int, int>, Compare> chunk_size_set;
         for (int i = 1; i < size; i++)
@@ -267,7 +265,6 @@ int main(int argc, char **argv)
                     }
                     ChunkMetaData chunk_metadata;
                     chunk_metadata.chunk_id = chunk_id;
-                    // remove -1 from replica_node_ranks
                     replica_node_ranks.erase(remove(replica_node_ranks.begin(), replica_node_ranks.end(), -1), replica_node_ranks.end());
                     chunk_metadata.replica_node_ranks = replica_node_ranks;
                     files[file_name].chunks.push_back(chunk_metadata);
@@ -302,6 +299,11 @@ int main(int argc, char **argv)
             {
                 string file_name;
                 ss >> file_name;
+                if(files.find(file_name) == files.end())
+                {
+                    cout << -1 << endl;
+                    continue;
+                }
                 for (int i = 0; i < files[file_name].chunks.size(); i++)
                 {
                     cout << files[file_name].chunks[i].chunk_id << " ";
@@ -330,35 +332,56 @@ int main(int argc, char **argv)
                 ss >> file_name;
                 FileMetaData file_metadata = files[file_name];
                 vector<pair<int, string>> received_chunks;
+                bool flag = true;
                 for (int i = 0; i < file_metadata.chunks.size(); i++)
                 {
                     ChunkMetaData chunk_metadata = file_metadata.chunks[i];
                     Body body;
                     body.request_type = RETRIEVE_TAG;
                     body.chunk_id = chunk_metadata.chunk_id;
-                    int rank_to_send = chunk_metadata.replica_node_ranks[0];
+                    int rank_to_send = -1;
+                    for (int j = 0; j < chunk_metadata.replica_node_ranks.size(); j++)
+                    {
+                        if (failed_nodes.find(chunk_metadata.replica_node_ranks[j]) == failed_nodes.end())
+                        {
+                            rank_to_send = chunk_metadata.replica_node_ranks[j];
+                            break;
+                        }
+                    }
+                    if (rank_to_send == -1)
+                    {
+                        flag = false;
+                        break;
+                    }
                     MPI_Send(&body, 1, MPI_BODY, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
                     int file_name_size = file_name.size();
                     MPI_Send(&file_name_size, 1, MPI_INT, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
                     MPI_Send(file_name.c_str(), file_name_size, MPI_CHAR, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
                 }
-                for (int i = 0; i < file_metadata.chunks.size(); i++)
+                if (!flag)
                 {
-                    int chunk_size;
-                    MPI_Status status;
-                    int rank_to_receive_from = file_metadata.chunks[i].replica_node_ranks[0];
-                    MPI_Recv(&chunk_size, 1, MPI_INT, rank_to_receive_from, RETRIEVE_TAG, MPI_COMM_WORLD, &status);
-                    string chunk_data;
-                    chunk_data.resize(chunk_size);
-                    MPI_Recv(&chunk_data[0], chunk_size, MPI_CHAR, rank_to_receive_from, RETRIEVE_TAG, MPI_COMM_WORLD, &status);
-                    received_chunks.emplace_back(file_metadata.chunks[i].chunk_id, chunk_data);
+                    cout << -1 << endl;
                 }
-                sort(received_chunks.begin(), received_chunks.end());
-                for (const auto &chunk : received_chunks)
+                else
                 {
-                    cout << chunk.second;
+                    for (int i = 0; i < file_metadata.chunks.size(); i++)
+                    {
+                        int chunk_size;
+                        MPI_Status status;
+                        int rank_to_receive_from = file_metadata.chunks[i].replica_node_ranks[0];
+                        MPI_Recv(&chunk_size, 1, MPI_INT, rank_to_receive_from, RETRIEVE_TAG, MPI_COMM_WORLD, &status);
+                        string chunk_data;
+                        chunk_data.resize(chunk_size);
+                        MPI_Recv(&chunk_data[0], chunk_size, MPI_CHAR, rank_to_receive_from, RETRIEVE_TAG, MPI_COMM_WORLD, &status);
+                        received_chunks.emplace_back(file_metadata.chunks[i].chunk_id, chunk_data);
+                    }
+                    sort(received_chunks.begin(), received_chunks.end());
+                    for (const auto &chunk : received_chunks)
+                    {
+                        cout << chunk.second;
+                    }
+                    cout << endl;
                 }
-                cout << endl;
             }
             else if (command == "search")
             {
@@ -372,25 +395,38 @@ int main(int argc, char **argv)
                     continue;
                 }
                 set<int> nodes_with_chunks;
+                bool chunk_not_found = false;
                 for (int i = 0; i < files[file_name].chunks.size(); i++)
                 {
+                    bool flag = false;
                     for (int j = 0; j < files[file_name].chunks[i].replica_node_ranks.size(); j++)
                     {
-                        nodes_with_chunks.insert(files[file_name].chunks[i].replica_node_ranks[j]);
+                        if (failed_nodes.find(files[file_name].chunks[i].replica_node_ranks[j]) == failed_nodes.end())
+                        {
+                            nodes_with_chunks.insert(files[file_name].chunks[i].replica_node_ranks[j]);
+                            flag = true;
+                        }
                     }
+                    if (!flag)
+                    {
+                        chunk_not_found = true;
+                        break;
+                    }
+                }
+                if (chunk_not_found)
+                {
+                    cout << -1 << endl;
+                    continue;
                 }
                 Body body;
                 body.request_type = SEARCH_TAG;
                 for (int node_rank : nodes_with_chunks)
                 {
-                    // send request type
                     MPI_Send(&body, 1, MPI_BODY, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     int file_name_size = file_name.size();
-                    // send file name size followed by filename
                     MPI_Send(&file_name_size, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     MPI_Send(file_name.c_str(), file_name_size, MPI_CHAR, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     int word_size = word.size();
-                    // send word size followed by word
                     MPI_Send(&word_size, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                     MPI_Send(word.c_str(), word_size, MPI_CHAR, node_rank, SEARCH_TAG, MPI_COMM_WORLD);
                 }
@@ -399,24 +435,19 @@ int main(int argc, char **argv)
                 {
                     int num_chunks;
                     MPI_Status status;
-                    // get number of relevant chunks
                     MPI_Recv(&num_chunks, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                     for (int i = 0; i < num_chunks; i++)
                     {
                         int chunk_id;
-                        // send chunk_id
                         MPI_Recv(&chunk_id, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                         int chunk_size;
-                        // send chunk_size
                         MPI_Recv(&chunk_size, 1, MPI_INT, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                         string chunk_data;
                         chunk_data.resize(chunk_size);
-                        // send chunk
                         MPI_Recv(&chunk_data[0], chunk_size, MPI_CHAR, node_rank, SEARCH_TAG, MPI_COMM_WORLD, &status);
                         received_chunks.emplace_back(chunk_id, chunk_data);
                     }
                 }
-                // remove duplicates
                 sort(received_chunks.begin(), received_chunks.end());
                 received_chunks.erase(unique(received_chunks.begin(), received_chunks.end()), received_chunks.end());
                 vector<int> keyword_offsets;
@@ -424,27 +455,34 @@ int main(int argc, char **argv)
                 {
                     int id_chunk = received_chunks[i].first;
                     int offset = files[file_name].offsets[id_chunk];
-                    size_t start = 0;
-                    size_t end;
-                    string last_word;
-                    string next_word;
-                    while ((end = received_chunks[i].second.find(' ', start)) != string::npos)
+                    string current_chunk_string = received_chunks[i].second;
+                    string next_chunk_string;
+                    if (i + 1 < received_chunks.size() && received_chunks[i + 1].first == id_chunk + 1)
                     {
-                        if (received_chunks[i].second.substr(start, end - start) == word)
-                        {
-                            keyword_offsets.push_back(offset + start);
-                        }
-                        last_word = received_chunks[i].second.substr(start, end - start);
-                        start = end + 1;
+                        next_chunk_string = received_chunks[i + 1].second;
                     }
-                    if (i + 1 < received_chunks.size())
+                    string combined_string = current_chunk_string + next_chunk_string;
+                    size_t start = 0, end;
+                    while ((end = combined_string.find(' ', start)) != string::npos)
                     {
-                        while ((end = received_chunks[i + 1].second.find(word, start)) != string::npos)
+                        string extracted_word = combined_string.substr(start, end - start);
+                        if (extracted_word == word)
                         {
-                            next_word = received_chunks[i + 1].second.substr(start, end - start);
+                            if (start < current_chunk_string.size())
+                            {
+                                keyword_offsets.push_back(offset + start);
+                            }
+                        }
+                        start = end + 1;
+                        if (start >= current_chunk_string.size())
+                        {
                             break;
                         }
-                        if (last_word + next_word == word)
+                    }
+                    if (start < current_chunk_string.size())
+                    {
+                        string last_word = combined_string.substr(start);
+                        if (last_word == word)
                         {
                             keyword_offsets.push_back(offset + start);
                         }
@@ -464,18 +502,13 @@ int main(int argc, char **argv)
                 failed_nodes.insert(failover_rank);
                 cout << 1 << endl;
                 auto it = std::find_if(chunk_size_set.begin(), chunk_size_set.end(), [failover_rank](const std::pair<int, int> &p)
-                           { return p.second == failover_rank; });
+                                       { return p.second == failover_rank; });
                 if (it != chunk_size_set.end())
                 {
-                    std::pair<int, int> updated = *it; 
-                    chunk_size_set.erase(it);         
-                    updated.first = 0;               
-                    chunk_size_set.insert(updated);   
-                }
-                {
-                    // lock_guard<mutex> lock(heartbeat_mutex);
-                    // nodes_failed[failover_rank] = true;
-                    // cout << "Node " << failover_rank << " is in failover state." << endl;
+                    std::pair<int, int> updated = *it;
+                    chunk_size_set.erase(it);
+                    updated.first = 0;
+                    chunk_size_set.insert(updated);
                 }
                 Body body = {FAILOVER_TAG, 0, rank, true};
                 MPI_Send(&body, 1, MPI_BODY, failover_rank, FAILOVER_TAG, MPI_COMM_WORLD);
@@ -484,13 +517,6 @@ int main(int argc, char **argv)
             {
                 int recover_rank;
                 ss >> recover_rank;
-                {
-                    // lock_guard<mutex> lock(heartbeat_mutex);
-                    // nodes_failed[recover_rank] = false;
-                    // nodes_active[recover_rank] = true;
-                    // last_heartbeat[recover_rank] = chrono::steady_clock::now();
-                    // cout << "Node " << recover_rank << " has been recovered." << endl;
-                }
                 Body body = {RECOVER_TAG, 0, rank, false};
                 MPI_Send(&body, 1, MPI_BODY, recover_rank, RECOVER_TAG, MPI_COMM_WORLD);
                 failed_nodes.erase(recover_rank);
@@ -498,13 +524,9 @@ int main(int argc, char **argv)
             }
             else if (command == "exit")
             {
-                // Signal threads to terminate
                 terminate_threads = true;
-
-                // Join threads
                 heartbeat_check_thread.join();
                 heartbeat_listen_thread.join();
-
                 for (int i = 1; i < size; i++)
                 {
                     Body body;
@@ -519,7 +541,8 @@ int main(int argc, char **argv)
         map<string, vector<Chunk>> storage;
         bool active = true;
 
-        thread heartbeat_thread([&]() {
+        thread heartbeat_thread([&]()
+                                {
             while (!terminate_threads)
             {
                 if (active)
@@ -529,8 +552,7 @@ int main(int argc, char **argv)
                     MPI_Send(&heartbeat, 1, MPI_BODY, 0, HEARTBEAT_TAG, MPI_COMM_WORLD);
                 }
                 this_thread::sleep_for(chrono::seconds(1));
-            }
-        });
+            } });
 
         while (true)
         {
@@ -576,50 +598,62 @@ int main(int argc, char **argv)
             {
                 string file_name;
                 int file_name_size;
-                // recieve file name size
                 MPI_Recv(&file_name_size, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 file_name.resize(file_name_size);
-                // recieve filename
                 MPI_Recv(&file_name[0], file_name_size, MPI_CHAR, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 string word;
                 int word_size;
-                // recieve word size
                 MPI_Recv(&word_size, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 word.resize(word_size);
-                // recieve word
                 MPI_Recv(&word[0], word_size, MPI_CHAR, 0, SEARCH_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 vector<pair<int, string>> chunks;
                 for (int i = 0; i < storage[file_name].size(); i++)
                 {
-                    if (storage[file_name][i].data.find(word) != string::npos)
+                    string chunk_string = storage[file_name][i].data;
+                    stringstream ss(chunk_string);
+                    string first_word, last_word;
+                    string temp;
+                    bool flag = false;
+                    while (ss >> temp)
+                    {
+                        if (first_word.empty())
+                        {
+                            first_word = temp;
+                        }
+                        last_word = temp;
+                        if (temp == word)
+                        {
+                            flag = true;
+                            break;
+                        }
+                    }
+                    if (!flag && (chunk_string.find(first_word) != string::npos || chunk_string.find(last_word) != string::npos))
+                    {
+                        flag = true;
+                    }
+                    if (flag)
                     {
                         chunks.emplace_back(storage[file_name][i].chunk_id, storage[file_name][i].data);
                     }
                 }
                 int num_chunks = chunks.size();
-                // send number of relevant chunks
                 MPI_Send(&num_chunks, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD);
                 for (int i = 0; i < num_chunks; i++)
                 {
                     int chunk_id = chunks[i].first;
                     int chunk_data_size = chunks[i].second.size();
-                    // send chunk_id
                     MPI_Send(&chunk_id, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD);
-                    // send chunk size
                     MPI_Send(&chunk_data_size, 1, MPI_INT, 0, SEARCH_TAG, MPI_COMM_WORLD);
-                    // send chunk
                     MPI_Send(chunks[i].second.c_str(), chunk_data_size, MPI_CHAR, 0, SEARCH_TAG, MPI_COMM_WORLD);
                 }
             }
             else if (status.MPI_TAG == FAILOVER_TAG)
             {
                 active = false;
-                // cout << "Node " << rank << " is in failover state. Stopping heartbeats." << endl;
             }
             else if (status.MPI_TAG == RECOVER_TAG)
             {
                 active = true;
-                // cout << "Node " << rank << " has been recovered." << endl;
             }
             else if (status.MPI_TAG == EXIT_TAG)
             {
