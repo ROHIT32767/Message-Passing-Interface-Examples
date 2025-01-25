@@ -44,9 +44,11 @@ pair<int, int> get_vertex_range(int process_number, int total_processes, int tot
 
 int main(int argc, char *argv[])
 {
+    ios_base::sync_with_stdio(false);
+    cin.tie(NULL);
     MPI_Init(&argc, &argv);
-    // string input_file = argv[1];
-    // string output_file = argv[2];
+    string input_file = argv[1];
+    string output_file = argv[2];
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -60,7 +62,7 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
     {
-        // freopen(input_file.c_str(), "r", stdin);
+        freopen(input_file.c_str(), "r", stdin);
         cin >> V >> E;
         adj_list.resize(V);
         for (int i = 0; i < E; i++)
@@ -97,9 +99,9 @@ int main(int argc, char *argv[])
         {
             blocked_set.insert(blocked_nodes.begin(), blocked_nodes.end());
         }
-        // fclose(stdin);
+        fclose(stdin);
     }
-
+    
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&E, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -194,8 +196,8 @@ int main(int argc, char *argv[])
         local_level_array.resize(end_vertex - start_vertex + 1, -1);
     }
 
-    set<int> local_frontier;
 
+    set<int> local_frontier;
     if (R >= start_vertex && R <= end_vertex)
     {
         if (blocked_set.find(R) == blocked_set.end())
@@ -316,15 +318,17 @@ int main(int argc, char *argv[])
     MPI_Gatherv(local_level_array.data(), local_level_array.size(), MPI_INT,
                 full_level_array.data(), send_counts.data(), displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+
     if (rank == 0)
     {
-        // freopen(output_file.c_str(), "w", stdout);
+        freopen(output_file.c_str(), "w", stdout);
         for (int i = 0; i < K; i++)
         {
             cout << full_level_array[starting_nodes[i]] << " ";
         }
         cout << endl;
-        // fclose(stdout);
+        fclose(stdout);
     }
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();

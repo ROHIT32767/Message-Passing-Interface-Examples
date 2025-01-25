@@ -154,6 +154,8 @@ void collisionHandle(vector<particle> &particles)
 
 int main(int argc, char *argv[])
 {
+    ios_base::sync_with_stdio(false);
+    cin.tie(NULL);
     MPI_Init(&argc, &argv);
     int rank, size;
     string input_file = argv[1];

@@ -265,6 +265,11 @@ int main(int argc, char **argv)
             {
                 string file_name;
                 ss >> file_name;
+                if(files.find(file_name) == files.end())
+                {
+                    cout << -1 << endl;
+                    continue;
+                }
                 FileMetaData file_metadata = files[file_name];
                 vector<pair<int, string>> received_chunks;
                 bool flag = true;
