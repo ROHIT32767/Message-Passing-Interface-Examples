@@ -54,4 +54,4 @@ done
 
 echo -e "Final Score: $total_marks/100"
 
-# rm -rf 1 results/
+rm -rf 1 results/

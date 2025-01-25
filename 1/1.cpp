@@ -45,8 +45,8 @@ pair<int, int> get_vertex_range(int process_number, int total_processes, int tot
 int main(int argc, char *argv[])
 {
     MPI_Init(&argc, &argv);
-    string input_file = argv[1];
-    string output_file = argv[2];
+    // string input_file = argv[1];
+    // string output_file = argv[2];
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
     {
-        freopen(input_file.c_str(), "r", stdin);
+        // freopen(input_file.c_str(), "r", stdin);
         cin >> V >> E;
         adj_list.resize(V);
         for (int i = 0; i < E; i++)
@@ -97,7 +97,7 @@ int main(int argc, char *argv[])
         {
             blocked_set.insert(blocked_nodes.begin(), blocked_nodes.end());
         }
-        fclose(stdin);
+        // fclose(stdin);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -318,12 +318,13 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
     {
-        freopen(output_file.c_str(), "w", stdout);
+        // freopen(output_file.c_str(), "w", stdout);
         for (int i = 0; i < K; i++)
         {
             cout << full_level_array[starting_nodes[i]] << " ";
         }
-        fclose(stdout);
+        cout << endl;
+        // fclose(stdout);
     }
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
