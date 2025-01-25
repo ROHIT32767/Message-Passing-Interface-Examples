@@ -34,7 +34,7 @@ for i in $(seq 1 $num_test_cases); do
         } | mpiexec -np $np --use-hwthread-cpus --oversubscribe $executable > "$output_file"
 
         # Replace with interactive_tester executable to test without load balancing
-        ./interactive_tester "$test_file" "$output_file" $np
+        ./lb_interactive_tester "$test_file" "$output_file" $np
         
         if [ $? -ne 0 ]; then
             all_passed=false
@@ -52,3 +52,5 @@ for i in $(seq 1 $num_test_cases); do
 done
 
 echo -e "Final Score: $total_marks/100"
+
+rm -rf 3 results/

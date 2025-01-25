@@ -156,9 +156,6 @@ int main(int argc, char **argv)
         int N = size;
         string command;
         set<int> failed_nodes;
-        std::filesystem::path cpp_file_path(__FILE__);
-        std::filesystem::path cpp_directory = cpp_file_path.parent_path();
-
         while (getline(cin, command))
         {
             stringstream ss(command);
@@ -169,8 +166,7 @@ int main(int argc, char **argv)
                 ss >> file_name;
                 string relative_path;
                 ss >> relative_path;
-                std::filesystem::path full_path = cpp_directory / relative_path;
-                ifstream file(full_path);
+                ifstream file(relative_path);
                 if (!file)
                 {
                     cout << -1 << endl;
@@ -238,7 +234,7 @@ int main(int argc, char **argv)
             {
                 string file_name;
                 ss >> file_name;
-                if(files.find(file_name) == files.end())
+                if (files.find(file_name) == files.end())
                 {
                     cout << -1 << endl;
                     continue;
@@ -292,10 +288,6 @@ int main(int argc, char **argv)
                         flag = false;
                         break;
                     }
-                    MPI_Send(&body, 1, MPI_BODY, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
-                    int file_name_size = file_name.size();
-                    MPI_Send(&file_name_size, 1, MPI_INT, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
-                    MPI_Send(file_name.c_str(), file_name_size, MPI_CHAR, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
                 }
                 if (!flag)
                 {
@@ -305,9 +297,37 @@ int main(int argc, char **argv)
                 {
                     for (int i = 0; i < file_metadata.chunks.size(); i++)
                     {
+                        ChunkMetaData chunk_metadata = file_metadata.chunks[i];
+                        Body body;
+                        body.request_type = RETRIEVE_TAG;
+                        body.chunk_id = chunk_metadata.chunk_id;
+                        int rank_to_send = -1;
+                        for (int j = 0; j < chunk_metadata.replica_node_ranks.size(); j++)
+                        {
+                            if (failed_nodes.find(chunk_metadata.replica_node_ranks[j]) == failed_nodes.end())
+                            {
+                                rank_to_send = chunk_metadata.replica_node_ranks[j];
+                                break;
+                            }
+                        }
+                        MPI_Send(&body, 1, MPI_BODY, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
+                        int file_name_size = file_name.size();
+                        MPI_Send(&file_name_size, 1, MPI_INT, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
+                        MPI_Send(file_name.c_str(), file_name_size, MPI_CHAR, rank_to_send, RETRIEVE_TAG, MPI_COMM_WORLD);
+                    }
+                    for (int i = 0; i < file_metadata.chunks.size(); i++)
+                    {
                         int chunk_size;
                         MPI_Status status;
-                        int rank_to_receive_from = file_metadata.chunks[i].replica_node_ranks[0];
+                        int rank_to_receive_from = -1;
+                        for (int j = 0; j < file_metadata.chunks[i].replica_node_ranks.size(); j++)
+                        {
+                            if (failed_nodes.find(file_metadata.chunks[i].replica_node_ranks[j]) == failed_nodes.end())
+                            {
+                                rank_to_receive_from = file_metadata.chunks[i].replica_node_ranks[j];
+                                break;
+                            }
+                        }
                         MPI_Recv(&chunk_size, 1, MPI_INT, rank_to_receive_from, RETRIEVE_TAG, MPI_COMM_WORLD, &status);
                         string chunk_data;
                         chunk_data.resize(chunk_size);
@@ -570,11 +590,9 @@ int main(int argc, char **argv)
             }
             else if (status.MPI_TAG == FAILOVER_TAG)
             {
-
             }
             else if (status.MPI_TAG == RECOVER_TAG)
             {
-
             }
             else if (status.MPI_TAG == EXIT_TAG)
             {
