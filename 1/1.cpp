@@ -45,20 +45,22 @@ pair<int, int> get_vertex_range(int process_number, int total_processes, int tot
 int main(int argc, char *argv[])
 {
     MPI_Init(&argc, &argv);
+    string input_file = argv[1];
+    string output_file = argv[2];
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
     int V, E, R, K, L;
-    vector< vector<int> > adj_list;
+    vector<vector<int>> adj_list;
     vector<int> blocked_nodes;
     vector<int> starting_nodes;
-    vector< vector<int> > local_adj_list;
+    vector<vector<int>> local_adj_list;
     vector<int> local_level_array;
     set<int> blocked_set;
 
     if (rank == 0)
     {
+        freopen(input_file.c_str(), "r", stdin);
         cin >> V >> E;
         adj_list.resize(V);
         for (int i = 0; i < E; i++)
@@ -72,7 +74,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                adj_list[u].push_back(v);
+                adj_list[v].push_back(u);
             }
         }
         cin >> K;
@@ -83,14 +85,21 @@ int main(int argc, char *argv[])
         }
         cin >> R;
         cin >> L;
-        blocked_nodes.resize(L);
+        if (L > 0)
+        {
+            blocked_nodes.resize(L);
+        }
         for (int i = 0; i < L; i++)
         {
             cin >> blocked_nodes[i];
         }
-        blocked_set.insert(blocked_nodes.begin(), blocked_nodes.end());
+        if (L > 0)
+        {
+            blocked_set.insert(blocked_nodes.begin(), blocked_nodes.end());
+        }
+        fclose(stdin);
     }
-    
+
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&E, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -180,7 +189,8 @@ int main(int argc, char *argv[])
     int start_vertex = vertex_range.first;
     int end_vertex = vertex_range.second;
 
-    if(start_vertex <= end_vertex){
+    if (start_vertex <= end_vertex)
+    {
         local_level_array.resize(end_vertex - start_vertex + 1, -1);
     }
 
@@ -188,8 +198,9 @@ int main(int argc, char *argv[])
 
     if (R >= start_vertex && R <= end_vertex)
     {
-        if(blocked_set.find(R) == blocked_set.end()){
-            local_level_array[R-start_vertex] = 0;
+        if (blocked_set.find(R) == blocked_set.end())
+        {
+            local_level_array[R - start_vertex] = 0;
             local_frontier.insert(R);
         }
     }
@@ -207,17 +218,20 @@ int main(int argc, char *argv[])
 
             for (int neighbor : local_adj_list[v - start_vertex])
             {
-                if(blocked_set.find(neighbor) != blocked_set.end()){
+                if (blocked_set.find(neighbor) != blocked_set.end())
+                {
                     continue;
                 }
-                else if(neighbor >= start_vertex && neighbor <= end_vertex){
+                else if (neighbor >= start_vertex && neighbor <= end_vertex)
+                {
                     if (local_level_array[neighbor - start_vertex] == -1)
                     {
                         local_level_array[neighbor - start_vertex] = level + 1;
                         local_frontier.insert(neighbor);
                     }
                 }
-                else{
+                else
+                {
                     new_neighbors.insert(neighbor);
                 }
             }
@@ -226,7 +240,7 @@ int main(int argc, char *argv[])
         vector<int> to_send(new_neighbors.begin(), new_neighbors.end());
         vector<int> recv_buffer;
 
-        vector< vector<int> > to_send_to(size);
+        vector<vector<int>> to_send_to(size);
         for (int neighbor : to_send)
         {
             int owner_process = get_process_number(neighbor, size, V);
@@ -260,11 +274,14 @@ int main(int argc, char *argv[])
 
         for (int neighbor : recv_buffer)
         {
-            if(blocked_set.find(neighbor) != blocked_set.end()){
+            if (blocked_set.find(neighbor) != blocked_set.end())
+            {
                 continue;
             }
-            else if(neighbor >= start_vertex && neighbor <= end_vertex){
-                if(local_level_array[neighbor - start_vertex] == -1){
+            else if (neighbor >= start_vertex && neighbor <= end_vertex)
+            {
+                if (local_level_array[neighbor - start_vertex] == -1)
+                {
                     local_level_array[neighbor - start_vertex] = level + 1;
                     local_frontier.insert(neighbor);
                 }
@@ -301,10 +318,12 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
     {
-        for(int i=0;i<K;i++){
+        freopen(output_file.c_str(), "w", stdout);
+        for (int i = 0; i < K; i++)
+        {
             cout << full_level_array[starting_nodes[i]] << " ";
         }
-        cout << endl;
+        fclose(stdout);
     }
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();

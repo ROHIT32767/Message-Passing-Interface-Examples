@@ -156,11 +156,14 @@ int main(int argc, char *argv[])
 {
     MPI_Init(&argc, &argv);
     int rank, size;
+    string input_file = argv[1];
+    string output_file = argv[2];
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     int N, M, K, T;
     if (rank == 0)
     {
+        freopen(input_file.c_str(), "r", stdin);
         cin >> N >> M >> K >> T;
     }
     MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -185,6 +188,7 @@ int main(int argc, char *argv[])
             MPI_Send(&particle_var, 1, MPI_PARTICLE, process, 0, MPI_COMM_WORLD);
             particleCount[process]++;
         }
+        fclose(stdin);
     }
     MPI_Bcast(&particleCount[0], size, MPI_INT, 0, MPI_COMM_WORLD);
     int num_particles = particleCount[rank];
@@ -370,11 +374,13 @@ int main(int argc, char *argv[])
     MPI_Gatherv(&particles[0], particles.size(), MPI_PARTICLE, &allParticles[0], &recvcounts[0], &displs[0], MPI_PARTICLE, 0, MPI_COMM_WORLD);
     if (rank == 0)
     {
+        freopen(output_file.c_str(), "w", stdout);
         sort(allParticles.begin(), allParticles.end(), compareParticles);
         for (auto &particle_var : allParticles)
         {
             cout << particle_var.x << " " << particle_var.y << " " << particle_var.dir << endl;
         }
+        fclose(stdout);
     }
     MPI_Finalize();
     return 0;
