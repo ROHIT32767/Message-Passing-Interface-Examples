@@ -531,6 +531,10 @@ int main(int argc, char **argv)
                     cout << -1 << endl;
                     continue;
                 }
+                if(failover_rank == 0){
+                    cout << -1 << endl;
+                    continue;
+                }
                 failed_nodes.insert(failover_rank);
                 cout << 1 << endl;
                 auto it = std::find_if(chunk_size_set.begin(), chunk_size_set.end(), [failover_rank](const std::pair<int, int> &p)
@@ -550,6 +554,10 @@ int main(int argc, char **argv)
             {
                 int recover_rank;
                 ss >> recover_rank;
+                if(recover_rank == 0){
+                    cout << -1 << endl;
+                    continue;
+                }
                 if(failed_nodes.find(recover_rank) == failed_nodes.end()){
                     cout << -1 << endl;
                     continue;
