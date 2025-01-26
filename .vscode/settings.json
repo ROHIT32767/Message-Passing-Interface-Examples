@@ -3,6 +3,7 @@
         "*.rmd": "markdown",
         "__locale": "cpp",
         "vector": "cpp",
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "set": "cpp"
     }
 }

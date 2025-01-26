@@ -5,11 +5,11 @@
 #include <queue>
 #include <set>
 using namespace std;
-
-int get_process_number(int vertex, int total_processes, int total_vertices)
+typedef long long ll;
+ll get_process_number(ll vertex, ll total_processes, ll total_vertices)
 {
-    int div = total_vertices / total_processes;
-    int rem = total_vertices % total_processes;
+    ll div = total_vertices / total_processes;
+    ll rem = total_vertices % total_processes;
     if (vertex < rem * (div + 1))
     {
         return vertex / (div + 1);
@@ -20,11 +20,11 @@ int get_process_number(int vertex, int total_processes, int total_vertices)
     }
 }
 
-pair<int, int> get_vertex_range(int process_number, int total_processes, int total_vertices)
+pair<ll, ll> get_vertex_range(ll process_number, ll total_processes, ll total_vertices)
 {
-    int div = total_vertices / total_processes;
-    int rem = total_vertices % total_processes;
-    int start_vertex, end_vertex;
+    ll div = total_vertices / total_processes;
+    ll rem = total_vertices % total_processes;
+    ll start_vertex, end_vertex;
     if (process_number < rem)
     {
         start_vertex = process_number * (div + 1);
@@ -65,9 +65,9 @@ int main(int argc, char *argv[])
         freopen(input_file.c_str(), "r", stdin);
         cin >> V >> E;
         adj_list.resize(V);
-        for (int i = 0; i < E; i++)
+        for (ll i = 0; i < E; i++)
         {
-            int u, v, d;
+            ll u, v, d;
             cin >> u >> v >> d;
             if (d == 1)
             {
@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
         }
         cin >> K;
         starting_nodes.resize(K);
-        for (int i = 0; i < K; i++)
+        for (ll i = 0; i < K; i++)
         {
             cin >> starting_nodes[i];
         }
@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
         {
             blocked_nodes.resize(L);
         }
-        for (int i = 0; i < L; i++)
+        for (ll i = 0; i < L; i++)
         {
             cin >> blocked_nodes[i];
         }
@@ -119,9 +119,9 @@ int main(int argc, char *argv[])
 
     if (rank != 0)
     {
-        pair<int, int> vertex_range = get_vertex_range(rank, size, V);
-        int start = vertex_range.first;
-        int end = vertex_range.second;
+        pair<ll, ll> vertex_range = get_vertex_range(rank, size, V);
+        ll start = vertex_range.first;
+        ll end = vertex_range.second;
         if (start <= end)
         {
 
@@ -137,7 +137,7 @@ int main(int argc, char *argv[])
 
             local_adj_list.resize(num_vertices);
             int index = 0;
-            for (int i = 0; i < num_vertices; i++)
+            for (ll i = 0; i < num_vertices; i++)
             {
                 local_adj_list[i].assign(flat_data.begin() + index, flat_data.begin() + index + sizes[i]);
                 index += sizes[i];
@@ -148,9 +148,9 @@ int main(int argc, char *argv[])
     {
         for (int p = 1; p < size; p++)
         {
-            pair<int, int> range = get_vertex_range(p, size, V);
-            int start_vertex = range.first;
-            int end_vertex = range.second;
+            pair<ll, ll> range = get_vertex_range(p, size, V);
+            ll start_vertex = range.first;
+            ll end_vertex = range.second;
 
             if (start_vertex > end_vertex)
             {
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
             }
 
             vector<int> sizes, flat_data;
-            for (int i = start_vertex; i <= end_vertex; i++)
+            for (ll i = start_vertex; i <= end_vertex; i++)
             {
                 sizes.push_back(adj_list[i].size());
                 flat_data.insert(flat_data.end(), adj_list[i].begin(), adj_list[i].end());
@@ -170,11 +170,11 @@ int main(int argc, char *argv[])
             MPI_Send(flat_data.data(), flat_data.size(), MPI_INT, p, 0, MPI_COMM_WORLD);
         }
 
-        pair<int, int> rank0_range = get_vertex_range(0, size, V);
-        int start_vertex = rank0_range.first;
-        int end_vertex = rank0_range.second;
+        pair<ll, ll> rank0_range = get_vertex_range(0, size, V);
+        ll start_vertex = rank0_range.first;
+        ll end_vertex = rank0_range.second;
         local_adj_list.resize(end_vertex - start_vertex + 1);
-        for (int i = start_vertex; i <= end_vertex; i++)
+        for (ll i = start_vertex; i <= end_vertex; i++)
         {
             local_adj_list[i - start_vertex] = adj_list[i];
         }
@@ -187,9 +187,9 @@ int main(int argc, char *argv[])
         adj_list.clear();
     }
 
-    pair<int, int> vertex_range = get_vertex_range(rank, size, V);
-    int start_vertex = vertex_range.first;
-    int end_vertex = vertex_range.second;
+    pair<ll, ll> vertex_range = get_vertex_range(rank, size, V);
+    ll start_vertex = vertex_range.first;
+    ll end_vertex = vertex_range.second;
 
     if (start_vertex <= end_vertex)
     {
@@ -307,7 +307,7 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
     {
-        for (int i = 0; i < size; i++)
+        for (ll i = 0; i < size; i++)
         {
             pair<int, int> range = get_vertex_range(i, size, V);
             send_counts[i] = max(0, range.second - range.first + 1);
@@ -323,7 +323,7 @@ int main(int argc, char *argv[])
     if (rank == 0)
     {
         freopen(output_file.c_str(), "w", stdout);
-        for (int i = 0; i < K; i++)
+        for (ll i = 0; i < K; i++)
         {
             cout << full_level_array[starting_nodes[i]] << " ";
         }

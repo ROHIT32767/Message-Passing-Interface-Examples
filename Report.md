@@ -3,6 +3,12 @@
 
 ## Question 1
 
+### Distributed BFS
+
+```
+The graph is partitioned into equal parts and each process is assigned a set of vertices. When a vertex is visited, its neighbors are communicated to the corresponding process.
+```
+
 **Time Complexity:**
 
 * **Factors:**
@@ -46,6 +52,9 @@
 ## Question 2
 
 #### Distributed Particle Simulation
+```
+The grid is divided into rows and each process is assigned a set of rows. When a particle moves to a different row, it is communicated to the corresponding process. 
+```
 
 **Time Complexity:**
 
@@ -79,6 +88,7 @@
 * Messages: O(T * K + P)
 * Space: O(K + K/P)
 
+![Scaling Analysis](./Q2.png)
 
 ## Question 3
 * **Nodes and Chunks:**
@@ -128,3 +138,22 @@
 * **Overall Time Complexity:** O(C * N + C * W + N) 
 * **Overall Space Complexity:** O(F * C * CHUNK_SIZE + F * C) 
 * **Overall Message Complexity:** O(C * 12 + N)
+
+
+# Assumptions
+
+### Question 1
+
+- 1D grid partitioning of the graph.
+
+### Question 2
+
+- 1D grid partitioning of the matrix
+- It is assumed that particles cannot collide at the start of the simulation.
+
+### Question 3
+
+- Distributed Search is done by fetching only the relevant chunks that have a complete match with search word or if their suffix or prefix is a substring of the search word.
+- Heartbeat Interval is 500ms and Failover Interval is 1500ms
+- Load balancing is done by always pciking storage nodes with the least number of chunks. (When a node fails, the chunks count of the node becomes zero)
+- It was assumed that there are no time constraints on the upload and retrieval of chunks. The system is optimized for fault tolerance and load balancing.

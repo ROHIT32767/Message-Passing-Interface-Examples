@@ -7,36 +7,39 @@
 #include <bits/stdc++.h>
 
 using namespace std;
-struct stone
+typedef long long ll;
+
+struct ball
 {
-    int stone_index;
+    int ball_index;
     int x;
     int y;
-    char direction;
-    bool operator==(const stone &stone_particle) const
+    char ball_direction;
+    bool operator==(const ball &temp) const
     {
-        return (x == stone_particle.x && y == stone_particle.y and direction == stone_particle.direction);
+        return (x == temp.x && y == temp.y and ball_direction == temp.ball_direction);
     }
 };
 
-bool compareParticles(const stone &stone_particle_1, const stone &stone_particle_2)
+bool compareParticles(const ball &ball1, const ball &ball2)
 {
-    return stone_particle_2.stone_index > stone_particle_1.stone_index;
+    return ball2.ball_index > ball1.ball_index;
 }
 
-bool shouldRemoveParticle(const stone &stone_particle)
+bool shouldRemoveParticle(const ball &ball_object)
 {
-    if(stone_particle.x == -1 && stone_particle.y == -1){
+    if(ball_object.x == -1 && ball_object.y == -1)
+    {
         return true;
     }
     return false;
 }
 
-pair<int, int> get_row_range(int process_number, int total_processes, int total_rows)
+pair<ll, ll> get_row_range(ll process_number, ll total_processes, ll total_rows)
 {
-    int div = total_rows / total_processes;
-    int rem = total_rows % total_processes;
-    int start_vertex, end_vertex;
+    ll div = total_rows / total_processes;
+    ll rem = total_rows % total_processes;
+    ll start_vertex, end_vertex;
     if (process_number < rem)
     {
         start_vertex = process_number * (div + 1);
@@ -54,10 +57,10 @@ pair<int, int> get_row_range(int process_number, int total_processes, int total_
     return make_pair(start_vertex, end_vertex);
 }
 
-int get_process_number(int row, int total_processes, int total_rows)
+ll get_process_number(ll row, ll total_processes, ll total_rows)
 {
-    int div = total_rows / total_processes;
-    int rem = total_rows % total_processes;
+    ll div = total_rows / total_processes;
+    ll rem = total_rows % total_processes;
     if (row < rem * (div + 1))
     {
         return row / (div + 1);
@@ -68,87 +71,92 @@ int get_process_number(int row, int total_processes, int total_rows)
     }
 }
 
-MPI_Datatype MPI_PARTICLE;
+MPI_Datatype MPI_BALL;
 
-char nextDirection(char direction)
+char nextDirection(char ball_direction)
 {
-    if (direction == 'D')
+    if (ball_direction == 'D')
         return 'L';
-    else if (direction == 'L')
+    else if (ball_direction == 'L')
         return 'U';
-    else if (direction == 'U')
+    else if (ball_direction == 'U')
         return 'R';
-    else if (direction == 'R')
+    else if (ball_direction == 'R')
         return 'D';
-    return direction;
+    return ball_direction;
 }
 
-char opposite_direction(char direction)
+char opposite_direction(char ball_direction)
 {
-    if (direction == 'D')
+    if (ball_direction == 'D')
         return 'U';
-    else if (direction == 'L')
+    else if (ball_direction == 'L')
         return 'R';
-    else if (direction == 'U')
+    else if (ball_direction == 'U')
         return 'D';
-    else if (direction == 'R')
+    else if (ball_direction == 'R')
         return 'L';
-    return direction;
+    return ball_direction;
 }
 
-void handle_collision(vector<stone> &stones)
+void handle_collision(vector<ball> &balls)
 {
-    map<int, int> collision_index_map;
-    for (int i = 0; i <= stones.size() - 1; i++)
+    map<ll, ll> map_index;
+    for (ll i = 0; i+1 <= balls.size(); i++)
     {
-        collision_index_map[stones[i].stone_index] = i;
+        map_index[balls[i].ball_index] = i;
     }
-    map< pair<int, int>, set<int> > coordinate_index_map;
-    for (int i = 0; i <= stones.size() - 1; i++)
+    map< pair<ll, ll>, set<ll> > map_position;
+    for (ll i = 0; i+1 <= balls.size(); i++)
     {
-        coordinate_index_map[make_pair(stones[i].x, stones[i].y)].insert(stones[i].stone_index);
+        map_position[make_pair(balls[i].x, balls[i].y)].insert(balls[i].ball_index);
     }
-    for (auto &entry : coordinate_index_map)
+
+    for (auto &entry : map_position)
     {
         auto &position = entry.first;
         auto &particle_indices = entry.second;
-        int count = particle_indices.size();
+        ll count = particle_indices.size();
         if (count == 2)
         {
-            auto it = particle_indices.begin();
-            int stone_one_collision = *it;
-            it++;
-            int stone_two_collision = *it;
-            int ind1 = -1, ind2 = -1;
-            ind1 = collision_index_map[stone_one_collision];
-            ind2 = collision_index_map[stone_two_collision];
-            if (ind1 != -1 && ind2 != -1)
+            ll first_ball = -1;
+            ll second_ball = -1;
+            auto iterator_set = particle_indices.begin();
+            ll temp1 = *iterator_set;
+            iterator_set++;
+            ll temp2 = *iterator_set;
+            first_ball = map_index[temp1];
+            second_ball = map_index[temp2];
+            if (first_ball != -1 && second_ball != -1)
             {
-                stones[ind1].direction = nextDirection(stones[ind1].direction);
-                stones[ind2].direction = nextDirection(stones[ind2].direction);
+                balls[first_ball].ball_direction = nextDirection(balls[first_ball].ball_direction);
+                balls[second_ball].ball_direction = nextDirection(balls[second_ball].ball_direction);
             }
         }
         else if (count == 4)
         {
-            auto it = particle_indices.begin();
-            int stone_one_collision = *it;
-            it++;
-            int stone_two_collision = *it;
-            it++;
-            int stone_three_collision = *it;
-            it++;
-            int stone_four_collision = *it;
-            int ind1 = -1, ind2 = -1, ind3 = -1, ind4 = -1;
-            ind1 = collision_index_map[stone_one_collision];
-            ind2 = collision_index_map[stone_two_collision];
-            ind3 = collision_index_map[stone_three_collision];
-            ind4 = collision_index_map[stone_four_collision];
-            if (ind1 != -1 && ind2 != -1 && ind3 != -1 && ind4 != -1)
+            ll first_ball = -1;
+            ll second_ball = -1;
+            ll third_ball = -1;
+            ll fourth_ball = -1;
+            auto iterator_set = particle_indices.begin();
+            ll temp1 = *iterator_set;
+            iterator_set++;
+            ll temp2 = *iterator_set;
+            iterator_set++;
+            ll temp3 = *iterator_set;
+            iterator_set++;
+            ll temp4 = *iterator_set;
+            first_ball = map_index[temp1];
+            second_ball = map_index[temp2];
+            third_ball = map_index[temp3];
+            fourth_ball = map_index[temp4];
+            if (first_ball != -1 && second_ball != -1 && third_ball != -1 && fourth_ball != -1)
             {
-                stones[ind1].direction = opposite_direction(stones[ind1].direction);
-                stones[ind2].direction = opposite_direction(stones[ind2].direction);
-                stones[ind3].direction = opposite_direction(stones[ind3].direction);
-                stones[ind4].direction = opposite_direction(stones[ind4].direction);
+                balls[first_ball].ball_direction = opposite_direction(balls[first_ball].ball_direction);
+                balls[second_ball].ball_direction = opposite_direction(balls[second_ball].ball_direction);
+                balls[third_ball].ball_direction = opposite_direction(balls[third_ball].ball_direction);
+                balls[fourth_ball].ball_direction = opposite_direction(balls[fourth_ball].ball_direction);
             }
         }
     }
@@ -175,94 +183,96 @@ int main(int argc, char *argv[])
     MPI_Bcast(&M, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&K, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&T, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    int blocklength = sizeof(stone);
-    MPI_Type_contiguous(blocklength, MPI_BYTE, &MPI_PARTICLE);
-    MPI_Type_commit(&MPI_PARTICLE);
-    vector<stone> stones(K);
-    vector<int> particleCount(size, 0);
+    int blocklength = sizeof(ball);
+    MPI_Type_contiguous(blocklength, MPI_BYTE, &MPI_BALL);
+    MPI_Type_commit(&MPI_BALL);
+    vector<ball> balls(K);
+    vector<int> ball_count(size, 0);
     if (rank == 0)
     {
-        for (int i = 0; i <= K-1; i++)
+        for (ll i = 0; i <= K-1; i++)
         {
-            cin >> stones[i].x >> stones[i].y >> stones[i].direction;
-            stones[i].stone_index = i;
+            cin >> balls[i].x >> balls[i].y >> balls[i].ball_direction;
+            balls[i].ball_index = i;
         }
-        for (auto &temp_stone : stones)
+        for (auto &ball_temp : balls)
         {
-            int process = get_process_number(temp_stone.y, size, M);
-            MPI_Send(&temp_stone, 1, MPI_PARTICLE, process, 0, MPI_COMM_WORLD);
-            particleCount[process]++;
+            ll process = get_process_number(ball_temp.y, size, M);
+            MPI_Send(&ball_temp, 1, MPI_BALL, process, 0, MPI_COMM_WORLD);
+            ball_count[process]++;
         }
         fclose(stdin);
     }
-    MPI_Bcast(&particleCount[0], size, MPI_INT, 0, MPI_COMM_WORLD);
-    int num_particles = particleCount[rank];
-    stones.resize(num_particles);
-    for (int i = 0; i <= num_particles - 1; i++)
+    MPI_Bcast(&ball_count[0], size, MPI_INT, 0, MPI_COMM_WORLD);
+    ll num_balls = ball_count[rank];
+    balls.resize(num_balls);
+    for (ll i = 0; i <= num_balls-1; i++)
     {
-        MPI_Recv(&stones[i], 1, MPI_PARTICLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&balls[i], 1, MPI_BALL, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     MPI_Barrier(MPI_COMM_WORLD);
-    pair<int, int> row_range = get_row_range(rank, size, M);
-    int start_row = row_range.first;
-    int end_row = row_range.second;
-    int root = 0;
+    pair<ll, ll> row_range = get_row_range(rank, size, M);
+    ll start_row = row_range.first;
+    ll end_row = row_range.second;
+    ll root = 0;
     MPI_Barrier(MPI_COMM_WORLD);
-    for (int i = 0; i <= T-1; i++)
+    for (ll i = 0; i <= T-1; i++)
     {
-        for (auto &temp_stone : stones)
+        for (auto &ball_temp : balls)
         {
-            if (temp_stone.x == 0 && temp_stone.direction == 'U')
+            if (ball_temp.x == 0 && ball_temp.ball_direction == 'U')
             {
-                temp_stone.x = N;
+                ball_temp.x = N;
             }
-            else if (temp_stone.x == N - 1 && temp_stone.direction == 'D')
+            else if (ball_temp.x == N - 1 && ball_temp.ball_direction == 'D')
             {
-                temp_stone.x = -1;
+                ball_temp.x = -1;
             }
-            else if (temp_stone.y == 0 && temp_stone.direction == 'L')
+            else if (ball_temp.y == 0 && ball_temp.ball_direction == 'L')
             {
-                temp_stone.y = M;
+                ball_temp.y = M;
             }
-            else if (temp_stone.y == M - 1 && temp_stone.direction == 'R')
+            else if (ball_temp.y == M - 1 && ball_temp.ball_direction == 'R')
             {
-                temp_stone.y = -1;
+                ball_temp.y = -1;
             }
         }
         MPI_Barrier(MPI_COMM_WORLD);
-        for (auto &temp_stone : stones)
+        for (auto &ball_temp : balls)
         {
             MPI_Request request;
-            if (temp_stone.y == -1 && temp_stone.direction == 'R')
+            bool send_flag = false;
+            if (ball_temp.y == -1 && ball_temp.ball_direction == 'R')
             {
-                int proc_num = get_process_number(0, size, M);
-                MPI_Send(&temp_stone, 1, MPI_PARTICLE, proc_num, 0, MPI_COMM_WORLD);
-                temp_stone.x = -1;
-                temp_stone.y = -1;
+                ll proc_num = get_process_number(0, size, M);
+                MPI_Send(&ball_temp, 1, MPI_BALL, proc_num, 0, MPI_COMM_WORLD);
+                send_flag = true;
             }
-            else if (temp_stone.y == M && temp_stone.direction == 'L')
+            else if (ball_temp.y == M && ball_temp.ball_direction == 'L')
             {
-                int proc_num = get_process_number(M - 1, size, M);
-                MPI_Send(&temp_stone, 1, MPI_PARTICLE, proc_num, 0, MPI_COMM_WORLD);
-                temp_stone.x = -1;
-                temp_stone.y = -1;
+                ll proc_num = get_process_number(M - 1, size, M);
+                MPI_Send(&ball_temp, 1, MPI_BALL, proc_num, 0, MPI_COMM_WORLD);
+                send_flag = true;
             }
-            else if (temp_stone.y == start_row && (rank - 1) >= 0 && temp_stone.direction == 'L')
+            else if (ball_temp.y == start_row && (rank - 1) >= 0 && ball_temp.ball_direction == 'L')
             {
-                MPI_Send(&temp_stone, 1, MPI_PARTICLE, rank - 1, 0, MPI_COMM_WORLD);
-                temp_stone.x = -1;
-                temp_stone.y = -1;
+                MPI_Send(&ball_temp, 1, MPI_BALL, rank - 1, 0, MPI_COMM_WORLD);
+                send_flag = true;
             }
-            else if (temp_stone.y == end_row && (rank + 1) < size && temp_stone.direction == 'R')
+            else if (ball_temp.y == end_row && (rank + 1) < size && ball_temp.ball_direction == 'R')
             {
-                MPI_Send(&temp_stone, 1, MPI_PARTICLE, rank + 1, 0, MPI_COMM_WORLD);
-                temp_stone.x = -1;
-                temp_stone.y = -1;
+                MPI_Send(&ball_temp, 1, MPI_BALL, rank + 1, 0, MPI_COMM_WORLD);
+                send_flag = true;
+            }
+
+            if(send_flag){
+                ball_temp.x = -1;
+                ball_temp.y = -1;
             }
         }
-        stones.erase(std::remove_if(stones.begin(), stones.end(), shouldRemoveParticle), stones.end());
+        balls.erase(std::remove_if(balls.begin(), balls.end(), shouldRemoveParticle), balls.end());
         MPI_Barrier(MPI_COMM_WORLD);
-        if (rank + 2 <= size)
+        if (rank <= size-2)
         {
             MPI_Status status;
             MPI_Request request;
@@ -270,9 +280,9 @@ int main(int argc, char *argv[])
             MPI_Iprobe(rank + 1, 0, MPI_COMM_WORLD, &flag, &status);
             while (flag)
             {
-                stone p;
-                MPI_Recv(&p, 1, MPI_PARTICLE, rank + 1, 0, MPI_COMM_WORLD, &status);
-                stones.push_back(p);
+                ball send_object;
+                MPI_Recv(&send_object, 1, MPI_BALL, rank + 1, 0, MPI_COMM_WORLD, &status);
+                balls.push_back(send_object);
                 MPI_Iprobe(rank + 1, 0, MPI_COMM_WORLD, &flag, &status);
             }
         }
@@ -287,9 +297,9 @@ int main(int argc, char *argv[])
             MPI_Iprobe(rank - 1, 0, MPI_COMM_WORLD, &flag, &status);
             while (flag)
             {
-                stone p;
-                MPI_Recv(&p, 1, MPI_PARTICLE, rank - 1, 0, MPI_COMM_WORLD, &status);
-                stones.push_back(p);
+                ball send_object;
+                MPI_Recv(&send_object, 1, MPI_BALL, rank - 1, 0, MPI_COMM_WORLD, &status);
+                balls.push_back(send_object);
                 MPI_Iprobe(rank - 1, 0, MPI_COMM_WORLD, &flag, &status);
             }
         }
@@ -301,90 +311,90 @@ int main(int argc, char *argv[])
             MPI_Status status;
             MPI_Request request;
             int flag = 0;
-            int last_process_allocated = get_process_number(M - 1, size, M);
+            ll last_process_allocated = get_process_number(M - 1, size, M);
             MPI_Iprobe(last_process_allocated, 0, MPI_COMM_WORLD, &flag, &status);
             while (flag)
             {
-                stone p;
-                MPI_Recv(&p, 1, MPI_PARTICLE, last_process_allocated, 0, MPI_COMM_WORLD, &status);
-                stones.push_back(p);
+                ball send_object;
+                MPI_Recv(&send_object, 1, MPI_BALL, last_process_allocated, 0, MPI_COMM_WORLD, &status);
+                balls.push_back(send_object);
                 MPI_Iprobe(last_process_allocated, 0, MPI_COMM_WORLD, &flag, &status);
             }
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
 
-        int last_process_allocated_rank = get_process_number(M - 1, size, M);
+        ll last_process_allocated_rank = get_process_number(M - 1, size, M);
         if (rank == last_process_allocated_rank)
         {
             MPI_Status status;
             MPI_Request request;
             int flag = 0;
-            int first_process_allocated = get_process_number(0, size, M);
+            ll first_process_allocated = get_process_number(0, size, M);
             MPI_Iprobe(first_process_allocated, 0, MPI_COMM_WORLD, &flag, &status);
             while (flag)
             {
-                stone p;
-                MPI_Recv(&p, 1, MPI_PARTICLE, first_process_allocated, 0, MPI_COMM_WORLD, &status);
-                stones.push_back(p);
+                ball send_object;
+                MPI_Recv(&send_object, 1, MPI_BALL, first_process_allocated, 0, MPI_COMM_WORLD, &status);
+                balls.push_back(send_object);
                 MPI_Iprobe(first_process_allocated, 0, MPI_COMM_WORLD, &flag, &status);
             }
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
-        for (auto &temp_stone : stones)
+        for (auto &ball_temp : balls)
         {
-            int x = temp_stone.x;
-            int y = temp_stone.y;
-            if (temp_stone.direction == 'L')
+            ll x = ball_temp.x;
+            ll y = ball_temp.y;
+            if (ball_temp.ball_direction == 'L')
             {
-                y = y-1;
+                y = y - 1;
             }
-            else if (temp_stone.direction == 'R')
+            else if (ball_temp.ball_direction == 'R')
             {
-                y = y+1;
+                y = y + 1;
             }
-            else if (temp_stone.direction == 'U')
+            else if (ball_temp.ball_direction == 'U')
             {
-                x = x-1;
+                x = x - 1;
             }
-            else if (temp_stone.direction == 'D')
+            else if (ball_temp.ball_direction == 'D')
             {
-                x = x+1;
+                x = x + 1;
             }
-            temp_stone.x = x;
-            temp_stone.y = y;
+            ball_temp.x = x;
+            ball_temp.y = y;
         }
         MPI_Barrier(MPI_COMM_WORLD);
-        handle_collision(stones);
+        handle_collision(balls);
         MPI_Barrier(MPI_COMM_WORLD);
     }
     MPI_Barrier(MPI_COMM_WORLD);
-    vector<stone> collected_stones;
-    int total_particles = 0;
-    int particle_size = stones.size();
+    vector<ball> collected_balls;
+    ll total_balls = 0;
+    ll particle_size = balls.size();
     vector<int> count_received(size);
-    vector<int> displs(size);
+    vector<int> displacements(size);
     MPI_Gather(&particle_size, 1, MPI_INT, &count_received[0], 1, MPI_INT, 0, MPI_COMM_WORLD);
     if (rank == 0)
     {
-        total_particles = accumulate(count_received.begin(), count_received.end(), 0);
-        collected_stones.resize(total_particles);
-        displs[0] = 0;
+        total_balls = accumulate(count_received.begin(), count_received.end(), 0);
+        collected_balls.resize(total_balls);
+        displacements[0] = 0;
         for (int i = 0; i < size-1; i++)
         {
-            displs[i+1] = displs[i];
-            displs[i+1] += count_received[i];
+            displacements[i+1] = displacements[i];
+            displacements[i+1] += count_received[i];
         }
     }
-    MPI_Gatherv(&stones[0], stones.size(), MPI_PARTICLE, &collected_stones[0], &count_received[0], &displs[0], MPI_PARTICLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(&balls[0], balls.size(), MPI_BALL, &collected_balls[0], &count_received[0], &displacements[0], MPI_BALL, 0, MPI_COMM_WORLD);
     if (rank == 0)
     {
         freopen(output_file.c_str(), "w", stdout);
-        sort(collected_stones.begin(), collected_stones.end(), compareParticles);
-        for (auto &temp_stone : collected_stones)
+        sort(collected_balls.begin(), collected_balls.end(), compareParticles);
+        for (auto &ball_temp : collected_balls)
         {
-            cout << temp_stone.x << " " << temp_stone.y << " " << temp_stone.direction << endl;
+            cout << ball_temp.x << " " << ball_temp.y << " " << ball_temp.ball_direction << endl;
         }
         fclose(stdout);
     }
