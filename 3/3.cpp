@@ -29,8 +29,8 @@
 #define MAIN_TAG 8
 #define THREAD_TAG 9
 
-#define FAILOVER_INTERVAL 3
-#define HEARTBEAT_INTERVAL 1
+#define FAILOVER_INTERVAL 1500
+#define HEARTBEAT_INTERVAL 500
 
 using namespace std;
 
@@ -57,6 +57,7 @@ struct FileMetaData
     string file_name;
     vector<ChunkMetaData> chunks;
     vector<int> offsets;
+    vector<bool> last_character_is_null;
 };
 
 struct Body
@@ -156,11 +157,11 @@ void sender_thread(int rank, const vector<bool> &stop_heartbeats)
             body.sender_rank = rank;
             MPI_Send(&body, 1, MPI_BODY, 0, HEARTBEAT_TAG, MPI_COMM_WORLD);
         }
-        std::this_thread::sleep_for(std::chrono::seconds(HEARTBEAT_INTERVAL));
+        std::this_thread::sleep_for(std::chrono::milliseconds(HEARTBEAT_INTERVAL));
     }
 }
 
-void receiver_thread(int size)
+void receiver_thread(int size, set<int> &failed_nodes)
 {
     while (running)
     {
@@ -173,24 +174,26 @@ void receiver_thread(int size)
             MPI_Recv(&body, 1, MPI_BODY, status.MPI_SOURCE, HEARTBEAT_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             std::lock_guard<std::mutex> lock(heartbeat_mutex);
             last_heartbeat[body.sender_rank] = std::chrono::steady_clock::now();
+            failed_nodes.erase(body.sender_rank);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 
-void monitor_thread(int size)
+void monitor_thread(int size, set<int> &failed_nodes)
 {
     while (running)
     {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
         auto now = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lock(heartbeat_mutex);
         for (int i = 1; i < size; i++)
         {
             if (last_heartbeat.find(i) != last_heartbeat.end() &&
-                std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat[i]).count() > FAILOVER_INTERVAL)
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - last_heartbeat[i]).count() > FAILOVER_INTERVAL)
             {
                 last_heartbeat.erase(i);
+                failed_nodes.insert(i);
             }
         }
     }
@@ -211,15 +214,15 @@ int main(int argc, char **argv)
     {
         map<string, FileMetaData> files;
         multiset<pair<int, int>, Compare> chunk_size_set;
-        std::thread monitor(monitor_thread, size);
-        std::thread receiver(receiver_thread, size);
+        set<int> failed_nodes;
+        std::thread monitor(monitor_thread, size, std::ref(failed_nodes));
+        std::thread receiver(receiver_thread, size, std::ref(failed_nodes));
         for (int i = 1; i < size; i++)
         {
             chunk_size_set.insert({0, i});
         }
         int N = size;
         string command;
-        set<int> failed_nodes;
         while (getline(cin, command))
         {
             stringstream ss(command);
@@ -236,14 +239,36 @@ int main(int argc, char **argv)
                     cout << -1 << endl;
                     continue;
                 }
+                if(files.find(file_name) != files.end()){
+                    cout << -1 << endl;
+                    continue;
+                }
                 string buffer;
                 buffer.resize(CHUNK_SIZE);
                 int chunk_id = 0;
                 int offset = 0;
+                bool flag = true;
                 while (file.read(&buffer[0], CHUNK_SIZE) || file.gcount() > 0)
                 {
+                    bool last_character_is_escape = false;
+                    bool local_flag = false;
                     vector<int> replica_node_ranks = get_replicate_node_ranks(chunk_size_set, N, failed_nodes);
+                    for(int l = 0; l < replica_node_ranks.size(); l++){
+                        if(replica_node_ranks[l] != -1){
+                            local_flag = true;
+                            break;
+                        }
+                    }
+                    if(!local_flag){
+                        flag = false;
+                        break;
+                    }
                     string chunk_data = buffer.substr(0, file.gcount());
+                    if (!chunk_data.empty() && (chunk_data.back() == ' ' || chunk_data.back() == '\n')) {
+                        last_character_is_escape = true;
+                    } else {
+                        last_character_is_escape = false;
+                    }
                     Body body;
                     body.request_type = UPLOAD_TAG;
                     body.chunk_id = chunk_id;
@@ -268,8 +293,13 @@ int main(int argc, char **argv)
                     chunk_metadata.replica_node_ranks = replica_node_ranks;
                     files[file_name].chunks.push_back(chunk_metadata);
                     files[file_name].offsets.push_back(offset);
+                    files[file_name].last_character_is_null.push_back(last_character_is_escape);
                     offset += file.gcount();
                     chunk_id++;
+                }
+                if(!flag){
+                    cout << -1 << endl;
+                    continue;
                 }
                 cout << 1 << endl;
                 for (int i = 0; i < files[file_name].chunks.size(); i++)
@@ -484,10 +514,12 @@ int main(int argc, char **argv)
                     int id_chunk = received_chunks[i].first;
                     int offset = files[file_name].offsets[id_chunk];
                     string current_chunk_string = received_chunks[i].second;
+                    replace(current_chunk_string.begin(), current_chunk_string.end(), '\n', ' ');
                     string next_chunk_string;
                     if (i + 1 < received_chunks.size() && received_chunks[i + 1].first == id_chunk + 1)
                     {
                         next_chunk_string = received_chunks[i + 1].second;
+                        replace(next_chunk_string.begin(), next_chunk_string.end(), '\n', ' ');
                     }
                     string combined_string = current_chunk_string + next_chunk_string;
                     size_t start = 0, end;
@@ -496,7 +528,15 @@ int main(int argc, char **argv)
                         string extracted_word = combined_string.substr(start, end - start);
                         if (extracted_word == word)
                         {
-                            if (start < current_chunk_string.size())
+                            if(start == 0){
+                                if(id_chunk==0){
+                                    keyword_offsets.push_back(offset);
+                                }
+                                else if(files[file_name].last_character_is_null[id_chunk-1] == true){
+                                    keyword_offsets.push_back(offset);
+                                }
+                            }
+                            else if (start < current_chunk_string.size())
                             {
                                 keyword_offsets.push_back(offset + start);
                             }
@@ -512,7 +552,17 @@ int main(int argc, char **argv)
                         string last_word = combined_string.substr(start);
                         if (last_word == word)
                         {
-                            keyword_offsets.push_back(offset + start);
+                            if(start == 0){
+                                if(id_chunk==0){
+                                    keyword_offsets.push_back(offset);
+                                }
+                                else if(files[file_name].last_character_is_null[id_chunk-1] == true){
+                                    keyword_offsets.push_back(offset);
+                                } 
+                            }
+                            else{
+                                keyword_offsets.push_back(offset + start);
+                            }
                         }
                     }
                 }
@@ -562,10 +612,10 @@ int main(int argc, char **argv)
                     cout << -1 << endl;
                     continue;
                 }
-                Body body = {RECOVER_TAG, 0, rank, false};
-                MPI_Send(&body, 1, MPI_BODY, recover_rank, MAIN_TAG, MPI_COMM_WORLD);
                 failed_nodes.erase(recover_rank);
                 stop_heartbeats[recover_rank] = false;
+                Body body = {RECOVER_TAG, 0, rank, false};
+                MPI_Send(&body, 1, MPI_BODY, recover_rank, MAIN_TAG, MPI_COMM_WORLD);
                 cout << 1 << endl;
             }
             else if (command == "exit")
@@ -578,6 +628,10 @@ int main(int argc, char **argv)
                 }
                 running = false;
                 break;
+            }
+            else{
+                cout << -1 << endl;
+                continue;
             }
         }
         monitor.join();
