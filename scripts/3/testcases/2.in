@@ -1,0 +1,6 @@
+upload a.txt testcases/a.txt
+failover 1
+list_file a.txt
+recover 1
+list_file a.txt
+exit
